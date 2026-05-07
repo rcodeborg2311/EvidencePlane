@@ -51,6 +51,10 @@ def signed_headers(body: bytes) -> dict[str, str]:
     }
 
 
+def admin_headers(token: str = "test-admin-token") -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 def post_receipt(client: TestClient, payload: dict[str, Any]):
     body = json_body(payload)
     return client.post("/api/v1/runs", content=body, headers=signed_headers(body))

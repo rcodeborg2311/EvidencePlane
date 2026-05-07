@@ -4,18 +4,27 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}EvidencePlane{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/vendor/pico.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
     <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
   </head>
   <body>
-    <header class="app-shell">
+    <header class="app-shell" role="banner">
       <nav class="topbar" aria-label="Primary">
         <a class="brand" href="/">
-          <span class="brand-mark">EP</span>
-          <span>EvidencePlane</span>
+          <span class="brand-mark" aria-hidden="true">EP</span>
+          <span>
+            <span class="brand-name">EvidencePlane</span>
+            <span class="brand-tagline">Agent evidence and policy plane</span>
+          </span>
         </a>
-        <span class="environment-pill">MVP v0.1</span>
+        <div class="topbar-actions">
+          <a class="topbar-link" href="https://github.com/rcodeborg2311/EvidencePlane/blob/mvp/docs/integrations/github-actions.md">CI guide</a>
+          <span class="system-status" aria-label="System status online">
+            <span aria-hidden="true"></span>
+            Online
+          </span>
+          <span class="environment-pill">MVP v0.1</span>
+        </div>
       </nav>
     </header>
     <main class="page">

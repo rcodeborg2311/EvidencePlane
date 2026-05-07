@@ -12,6 +12,7 @@ def test_post_run_then_get_run_detail_matches_persisted_decision(client):
 
     assert fetched.status_code == 200
     assert fetched.json()["decision"] == created.json()["decision"]
+    assert fetched.json()["policy_version"] == created.json()["policy_version"]
 
 
 def test_post_run_then_get_evidence_contains_run_id_and_matching_sha(client):
@@ -23,6 +24,7 @@ def test_post_run_then_get_evidence_contains_run_id_and_matching_sha(client):
     assert fetched.status_code == 200
     evidence = fetched.json()
     assert evidence["run_id"] == run_id
+    assert evidence["policy_version"] == created.json()["policy_version"]
     assert evidence["evidence_sha256"] == compute_evidence_sha256(evidence)
 
 

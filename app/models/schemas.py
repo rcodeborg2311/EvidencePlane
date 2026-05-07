@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Decision = Literal["allow", "review", "block"]
 Severity = Literal["low", "medium", "high"]
+ReviewStatus = Literal["not_required", "pending", "approved", "rejected"]
+ReviewOutcome = Literal["approved", "rejected"]
 
 
 class StrictModel(BaseModel):
@@ -69,7 +71,13 @@ class Violation(StrictModel):
 class DecisionResponse(StrictModel):
     run_id: UUID
     decision: Decision
+    policy_version: str = Field(min_length=1, max_length=32)
     risk_score: int = Field(ge=0, le=100)
+    review_status: ReviewStatus
+    review_outcome: ReviewOutcome | None
+    reviewer_identity: str | None
+    review_note: str | None
+    reviewed_at: datetime | None
     violations: list[Violation]
     evidence_pack_id: UUID
     evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -79,21 +87,32 @@ class DecisionResponse(StrictModel):
 class RunSummary(StrictModel):
     run_id: UUID
     decision: Decision
+    policy_version: str = Field(min_length=1, max_length=32)
     risk_score: int = Field(ge=0, le=100)
+    review_status: ReviewStatus
+    review_outcome: ReviewOutcome | None
+    reviewer_identity: str | None
+    review_note: str | None
+    reviewed_at: datetime | None
     repo_name: str
+    branch: str
     actor: str
     timestamp_utc: datetime
+    evidence_sha256: str
     created_at: datetime
 
 
 class RunDetail(RunSummary):
     idempotency_key: str
     commit_sha: str
-    branch: str
     changed_files: list[ChangedFile]
     tests: list[TestResult]
     tool_calls: list[ToolCall]
     policy_context: PolicyContext
     violations: list[Violation]
     evidence_pack_id: UUID
-    evidence_sha256: str
+
+
+class ReviewRequest(StrictModel):
+    reviewer_identity: str = Field(min_length=1, max_length=200)
+    review_note: str | None = Field(default=None, max_length=1000)

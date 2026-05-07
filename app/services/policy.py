@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from app.models.schemas import Decision, RunReceipt, Violation
 
+POLICY_VERSION = "1.0"
+
 VIOLATION_MESSAGES = {
     "SECRET_PATTERN_DETECTED": "A changed file indicated a detected secret pattern.",
     "FAILED_TESTS": "One or more tests failed.",

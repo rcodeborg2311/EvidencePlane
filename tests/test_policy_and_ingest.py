@@ -12,6 +12,7 @@ def test_valid_signature_is_accepted(client):
 
     assert response.status_code == 200
     assert response.json()["decision"] == "allow"
+    assert response.json()["policy_version"] == "1.0"
 
 
 def test_invalid_signature_returns_401(client):

@@ -1,74 +1,199 @@
 {% extends "base.html" %}
 {% block title %}Run {{ run.run_id }} - EvidencePlane{% endblock %}
 {% block content %}
-<section class="section">
-  <div class="detail-header">
-    <div>
-      <p class="eyebrow">Run detail</p>
-      <h1>{{ run.repo_name }}</h1>
-      <p class="subtle">{{ run.branch }} at {{ run.commit_sha }}</p>
-    </div>
-    <span class="decision-badge decision-{{ run.decision }}">{{ run.decision }}</span>
+<section class="run-hero" aria-labelledby="run-title">
+  <div class="run-hero-main">
+    <p class="eyebrow">Evidence pack</p>
+    <h1 id="run-title">{{ run.repo_name }}</h1>
+    <p class="hero-text">
+      <code class="inline-code">{{ run.branch }}</code>
+      <span>commit</span>
+      <code class="inline-code">{{ run.commit_sha[:12] }}</code>
+    </p>
   </div>
-
-  <div class="summary-grid">
-    <div class="summary-card">
-      <span>Risk score</span>
-      <strong>{{ run.risk_score }}</strong>
-    </div>
-    <div class="summary-card">
-      <span>Actor</span>
-      <strong>{{ run.actor }}</strong>
-    </div>
-    <div class="summary-card">
-      <span>Evidence</span>
-      <a class="button" href="/api/v1/evidence/{{ run.run_id }}" download>Download Evidence</a>
-    </div>
-    <div class="summary-card">
-      <span>Run ID</span>
-      <strong>{{ run.run_id }}</strong>
-    </div>
+  <div class="decision-panel decision-panel-{{ run.decision }}">
+    <span class="decision-badge decision-{{ run.decision }}">
+      <span class="status-dot" aria-hidden="true"></span>
+      {{ run.decision }}
+    </span>
+    <strong>{{ run.risk_score }}</strong>
+    <span>risk score</span>
   </div>
 </section>
 
-<section class="section">
-  <h2>Violations</h2>
+<section class="summary-grid" aria-label="Run summary">
+  <article class="summary-card">
+    <span>Actor</span>
+    <strong>{{ run.actor }}</strong>
+  </article>
+  <article class="summary-card">
+    <span>Timestamp</span>
+    <strong><time datetime="{{ run.timestamp_utc|iso_z }}">{{ run.timestamp_utc|iso_z }}</time></strong>
+  </article>
+  <article class="summary-card">
+    <span>Run ID</span>
+    <strong>{{ run.run_id }}</strong>
+  </article>
+  <article class="summary-card">
+    <span>Policy version</span>
+    <strong>{{ run.policy_version }}</strong>
+  </article>
+  <article class="summary-card">
+    <span>Review status</span>
+    <strong><span class="review-badge review-{{ run.review_status }}">{{ run.review_status }}</span></strong>
+  </article>
+  <article class="summary-card">
+    <span>Evidence hash</span>
+    <strong>{{ run.evidence_sha256 }}</strong>
+  </article>
+</section>
+
+<section class="evidence-panel" aria-labelledby="evidence-integrity-title">
+  <div>
+    <p class="eyebrow">Integrity</p>
+    <h2 id="evidence-integrity-title">Evidence SHA-256 verified on export</h2>
+    <p>
+      EvidencePlane stores the canonical evidence pack and recomputes the digest before
+      returning it for download.
+    </p>
+    <code class="hash-full">{{ run.evidence_sha256 }}</code>
+  </div>
+  <a class="button" href="/api/v1/evidence/{{ run.run_id }}" download>Download evidence JSON</a>
+</section>
+
+<section class="review-panel review-panel-{{ run.review_status }}" id="review-panel" aria-labelledby="review-title">
+  <div>
+    <p class="eyebrow">Human review</p>
+    {% if run.review_status == "pending" %}
+    <h2 id="review-title">Human review required</h2>
+    <p>
+      This run requires an admin decision before it should be treated as cleared.
+      Review the violations, changed files, tests, and tool calls before approving or rejecting.
+    </p>
+    {% elif run.review_status == "approved" %}
+    <h2 id="review-title">Approved by human reviewer</h2>
+    <p>
+      {{ run.reviewer_identity }} approved this run{% if run.reviewed_at %} at {{ run.reviewed_at|iso_z }}{% endif %}.
+    </p>
+    {% if run.review_note %}<blockquote>{{ run.review_note }}</blockquote>{% endif %}
+    {% elif run.review_status == "rejected" %}
+    <h2 id="review-title">Rejected by human reviewer</h2>
+    <p>
+      {{ run.reviewer_identity }} rejected this run{% if run.reviewed_at %} at {{ run.reviewed_at|iso_z }}{% endif %}.
+    </p>
+    {% if run.review_note %}<blockquote>{{ run.review_note }}</blockquote>{% endif %}
+    {% else %}
+    <h2 id="review-title">Human review not required</h2>
+    <p>The deterministic policy did not require a human review for this run.</p>
+    {% endif %}
+  </div>
+
+  {% if run.review_status == "pending" %}
+  <div class="review-actions">
+    <label for="admin-token">Admin token</label>
+    <input id="admin-token" class="input" type="password" autocomplete="current-password" placeholder="ADMIN_TOKEN" required>
+    <div class="review-form-grid">
+      <form class="review-form" action="/api/v1/runs/{{ run.run_id }}/review/approve" method="post">
+        <input class="input" name="reviewer_identity" placeholder="Reviewer name or email" required>
+        <textarea class="input" name="review_note" rows="3" placeholder="Approval note"></textarea>
+        <button class="button" type="submit">Approve review</button>
+        <p class="form-message" role="status"></p>
+      </form>
+      <form class="review-form" action="/api/v1/runs/{{ run.run_id }}/review/reject" method="post">
+        <input class="input" name="reviewer_identity" placeholder="Reviewer name or email" required>
+        <textarea class="input" name="review_note" rows="3" placeholder="Rejection note"></textarea>
+        <button class="button button-danger" type="submit">Reject review</button>
+        <p class="form-message" role="status"></p>
+      </form>
+    </div>
+  </div>
+  <script>
+    for (const form of document.querySelectorAll(".review-form")) {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const token = document.getElementById("admin-token").value;
+        const message = form.querySelector(".form-message");
+        const payload = {
+          reviewer_identity: form.elements.reviewer_identity.value,
+          review_note: form.elements.review_note.value || null
+        };
+        message.textContent = "Submitting review decision...";
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          window.location.reload();
+          return;
+        }
+        const body = await response.json();
+        message.textContent = body.error ? body.error.message : "Review update failed.";
+      });
+    }
+  </script>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="policy-outcome-title">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Policy outcome</p>
+      <h2 id="policy-outcome-title">Violations</h2>
+    </div>
+    <span class="section-meta">{{ run.violations|length }} recorded</span>
+  </div>
   {% if run.violations %}
   <ul class="violations">
     {% for violation in run.violations %}
     <li>
       <span class="severity severity-{{ violation.severity }}">{{ violation.severity }}</span>
-      <strong>{{ violation.code }}</strong>
-      <span>{{ violation.message }}</span>
+      <div>
+        <strong>{{ violation.code }}</strong>
+        <span>{{ violation.message }}</span>
+      </div>
     </li>
     {% endfor %}
   </ul>
   {% else %}
-  <p class="empty">No violations.</p>
+  <div class="empty-panel">
+    <strong>No policy violations</strong>
+    <p>The receipt satisfied the deterministic policy rules for this MVP.</p>
+  </div>
   {% endif %}
 </section>
 
-<section class="section">
-  <h2>Changed Files</h2>
+<section class="section" aria-labelledby="changed-files-title">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Repository evidence</p>
+      <h2 id="changed-files-title">Changed Files</h2>
+    </div>
+    <span class="section-meta">{{ run.changed_files|length }} {{ "file" if run.changed_files|length == 1 else "files" }}</span>
+  </div>
   <div class="table-wrap">
     <table>
+      <caption>Changed files reported by the signed receipt</caption>
       <thead>
         <tr>
-          <th>Path</th>
-          <th>Class</th>
-          <th>Additions</th>
-          <th>Deletions</th>
-          <th>Secret</th>
+          <th scope="col">Path</th>
+          <th scope="col">Class</th>
+          <th scope="col">Additions</th>
+          <th scope="col">Deletions</th>
+          <th scope="col">Secret detected</th>
         </tr>
       </thead>
       <tbody>
         {% for file in run.changed_files %}
         <tr>
-          <td>{{ file.path }}</td>
+          <td><code class="path-code">{{ file.path }}</code></td>
           <td><span class="table-chip">{{ file.classification }}</span></td>
           <td>{{ file.additions }}</td>
           <td>{{ file.deletions }}</td>
-          <td>{{ file.secret_detected }}</td>
+          <td>{{ "yes" if file.secret_detected else "no" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -76,55 +201,80 @@
   </div>
 </section>
 
-<section class="section">
-  <h2>Tool Calls</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Tool</th>
-          <th>Command</th>
-          <th>Network</th>
-          <th>Exit</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for tool in run.tool_calls %}
-        <tr>
-          <td>{{ tool.tool }}</td>
-          <td>{{ tool.command }}</td>
-          <td>{{ tool.network_access }}</td>
-          <td>{{ tool.exit_code }}</td>
-        </tr>
-        {% else %}
-        <tr><td colspan="4" class="empty">No tool calls.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<section class="section two-column">
+  <div aria-labelledby="tests-title">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Verification</p>
+        <h2 id="tests-title">Tests</h2>
+      </div>
+      <span class="section-meta">{{ run.tests|length }} reported</span>
+    </div>
+    <div class="table-wrap table-wrap-compact">
+      <table>
+        <caption>Tests reported by the signed receipt</caption>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for test in run.tests %}
+          <tr>
+            <td>{{ test.name }}</td>
+            <td><span class="table-chip status-{{ test.status }}">{{ test.status }}</span></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="empty">No tests reported.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div aria-labelledby="tool-calls-title">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Execution trace</p>
+        <h2 id="tool-calls-title">Tool Calls</h2>
+      </div>
+      <span class="section-meta">{{ run.tool_calls|length }} reported</span>
+    </div>
+    <div class="table-wrap table-wrap-compact">
+      <table>
+        <caption>Tool calls reported by the signed receipt</caption>
+        <thead>
+          <tr>
+            <th scope="col">Tool</th>
+            <th scope="col">Command</th>
+            <th scope="col">Network</th>
+            <th scope="col">Exit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tool in run.tool_calls %}
+          <tr>
+            <td>{{ tool.tool }}</td>
+            <td><code class="path-code">{{ tool.command }}</code></td>
+            <td>{{ "yes" if tool.network_access else "no" }}</td>
+            <td>{{ tool.exit_code }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="empty">No tool calls reported.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
-<section class="section">
-  <h2>Tests</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for test in run.tests %}
-        <tr>
-          <td>{{ test.name }}</td>
-          <td><span class="table-chip">{{ test.status }}</span></td>
-        </tr>
-        {% else %}
-        <tr><td colspan="2" class="empty">No tests reported.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<section class="command-panel" aria-labelledby="command-title">
+  <div>
+    <p class="eyebrow">Operator command</p>
+    <h2 id="command-title">Fetch this evidence pack</h2>
+    <p>Use this command from a trusted workstation or CI environment.</p>
   </div>
+  <pre><code>curl -sS http://127.0.0.1:8000/api/v1/evidence/{{ run.run_id }}</code></pre>
 </section>
 {% endblock %}

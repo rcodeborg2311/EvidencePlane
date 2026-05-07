@@ -38,7 +38,7 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements.txt
       - name: Compile source
-        run: .venv/bin/python -m compileall app tests scripts
+        run: .venv/bin/python -m compileall app tests scripts adapters
       - name: Run tests
         run: .venv/bin/python -m pytest
       - name: Run migrations

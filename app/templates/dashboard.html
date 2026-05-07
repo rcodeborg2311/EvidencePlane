@@ -1,52 +1,128 @@
 {% extends "base.html" %}
 {% block title %}Latest Runs - EvidencePlane{% endblock %}
 {% block content %}
-<section class="section">
-  <div class="page-heading">
-    <div>
-      <p class="eyebrow">Agent evidence and policy plane</p>
-      <h1>Latest Runs</h1>
-    </div>
-    <div class="metric-strip" aria-label="Dashboard summary">
-      <div>
-        <span>Shown</span>
-        <strong>{{ runs|length }}</strong>
-      </div>
-      <div>
-        <span>Source</span>
-        <strong>Signed receipts</strong>
-      </div>
-    </div>
+<section class="dashboard-hero" aria-labelledby="dashboard-title">
+  <div class="hero-copy">
+    <p class="eyebrow">Deterministic governance for coding-agent work</p>
+    <h1 id="dashboard-title">Latest Runs</h1>
+    <p class="hero-text">
+      EvidencePlane receives signed CI or agent-run receipts, applies fixed policy rules,
+      and stores auditable evidence packs for review.
+    </p>
   </div>
+  <div class="status-panel" aria-label="System status">
+    <span class="status-label">System status</span>
+    <strong>Online</strong>
+    <span class="status-note">HMAC ingest active</span>
+  </div>
+</section>
+
+<section class="metrics-grid" aria-label="Run metrics">
+  <article class="metric-card">
+    <span>Latest runs</span>
+    <strong>{{ metrics.total }}</strong>
+  </article>
+  <article class="metric-card metric-allow">
+    <span>Allowed</span>
+    <strong>{{ metrics.allow }}</strong>
+  </article>
+  <article class="metric-card metric-review">
+    <span>Needs review</span>
+    <strong>{{ metrics.review }}</strong>
+  </article>
+  <article class="metric-card metric-block">
+    <span>Blocked</span>
+    <strong>{{ metrics.block }}</strong>
+  </article>
+  <article class="metric-card metric-review">
+    <span>Pending reviews</span>
+    <strong>{{ metrics.pending_reviews }}</strong>
+  </article>
+  <article class="metric-card">
+    <span>Average risk</span>
+    <strong>{{ metrics.average_risk if metrics.average_risk is not none else "N/A" }}</strong>
+  </article>
+</section>
+
+{% if metrics.pending_reviews == 0 %}
+<section class="quiet-note" aria-label="Pending review status">
+  <strong>No pending human reviews</strong>
+  <span>Runs that require review will appear in the ledger with a pending review status.</span>
+</section>
+{% endif %}
+
+<section class="callout" aria-labelledby="ci-callout-title">
+  <div>
+    <p class="eyebrow">Production path</p>
+    <h2 id="ci-callout-title">Submit real receipts from CI</h2>
+    <p>
+      Use the CLI submitter or the GitHub Actions example to send signed evidence from a
+      trusted runner instead of relying on demo data.
+    </p>
+  </div>
+  <a class="button button-secondary" href="https://github.com/rcodeborg2311/EvidencePlane/blob/mvp/docs/integrations/github-actions.md">Open CI guide</a>
+</section>
+
+<section class="section" aria-labelledby="latest-runs-table">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Evidence ledger</p>
+      <h2 id="latest-runs-table">Latest Runs</h2>
+    </div>
+    <span class="section-meta">Newest first, capped at 50</span>
+  </div>
+
+  {% if runs %}
   <div class="table-wrap">
     <table>
+      <caption>Latest signed EvidencePlane run receipts</caption>
       <thead>
         <tr>
-          <th>Decision</th>
-          <th>Risk</th>
-          <th>Repository</th>
-          <th>Actor</th>
-          <th>Timestamp</th>
-          <th>Detail</th>
+          <th scope="col">Decision</th>
+          <th scope="col">Repository</th>
+          <th scope="col">Branch</th>
+          <th scope="col">Actor</th>
+          <th scope="col">Risk</th>
+          <th scope="col">Review</th>
+          <th scope="col">Policy</th>
+          <th scope="col">Timestamp</th>
+          <th scope="col">Evidence</th>
+          <th scope="col">Detail</th>
         </tr>
       </thead>
       <tbody>
         {% for run in runs %}
         <tr>
-          <td><span class="decision-badge decision-{{ run.decision }}">{{ run.decision }}</span></td>
-          <td><span class="risk-value">{{ run.risk_score }}</span></td>
-          <td><strong>{{ run.repo_name }}</strong></td>
+          <td>
+            <span class="decision-badge decision-{{ run.decision }}">
+              <span class="status-dot" aria-hidden="true"></span>
+              {{ run.decision }}
+            </span>
+          </td>
+          <td><strong class="repo-name">{{ run.repo_name }}</strong></td>
+          <td><code class="inline-code">{{ run.branch }}</code></td>
           <td>{{ run.actor }}</td>
-          <td><time datetime="{{ run.timestamp_utc }}">{{ run.timestamp_utc }}</time></td>
-          <td><a class="detail-link" href="/runs/{{ run.run_id }}">Open</a></td>
-        </tr>
-        {% else %}
-        <tr>
-          <td colspan="6" class="empty">No runs have been ingested.</td>
+          <td><span class="risk-value">{{ run.risk_score }}</span></td>
+          <td><span class="review-badge review-{{ run.review_status }}">{{ run.review_status }}</span></td>
+          <td><code class="inline-code">{{ run.policy_version }}</code></td>
+          <td><time datetime="{{ run.timestamp_utc|iso_z }}">{{ run.timestamp_utc|iso_z }}</time></td>
+          <td><code class="hash-preview">{{ run.evidence_sha256[:12] }}</code></td>
+          <td><a class="detail-link" href="/runs/{{ run.run_id }}">Open run detail</a></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  {% else %}
+  <div class="empty-state">
+    <p class="eyebrow">No receipts yet</p>
+    <h2>Submit the first signed receipt</h2>
+    <p>
+      Start the app, set <code class="inline-code">EVIDENCEPLANE_HMAC_SECRET</code>,
+      and submit a contract-valid receipt.
+    </p>
+    <pre><code>.venv/bin/python scripts/submit_receipt.py --file examples/receipts/allow.json --url http://127.0.0.1:8000 --pretty</code></pre>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}

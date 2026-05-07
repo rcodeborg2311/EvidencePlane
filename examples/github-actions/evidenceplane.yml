@@ -1,0 +1,88 @@
+name: EvidencePlane Governance
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  evidenceplane:
+    name: EvidencePlane decision
+    runs-on: ubuntu-latest
+    env:
+      # Configure these as repository or organization secrets before enabling.
+      EVIDENCEPLANE_URL: ${{ secrets.EVIDENCEPLANE_URL }}
+      EVIDENCEPLANE_HMAC_SECRET: ${{ secrets.EVIDENCEPLANE_HMAC_SECRET }}
+      EVIDENCEPLANE_ENFORCE_BLOCK: ${{ vars.EVIDENCEPLANE_ENFORCE_BLOCK || 'true' }}
+      EVIDENCEPLANE_ENFORCE_REVIEW: ${{ vars.EVIDENCEPLANE_ENFORCE_REVIEW || 'false' }}
+      EVIDENCEPLANE_RUN_DETAIL_BASE_URL: ${{ vars.EVIDENCEPLANE_RUN_DETAIL_BASE_URL }}
+      # Optional scanner hook. Example:
+      # EVIDENCEPLANE_SECRET_SCAN_COMMAND='gitleaks detect --source . --report-format json --report-path evidenceplane-secret-scan.json --exit-code 0'
+      EVIDENCEPLANE_SECRET_SCAN_COMMAND: ${{ vars.EVIDENCEPLANE_SECRET_SCAN_COMMAND }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.13"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run tests with JUnit output
+        id: tests
+        continue-on-error: true
+        run: |
+          set +e
+          python -m pytest -q --junitxml=evidenceplane-pytest.xml
+          exit_code=$?
+          echo "exit_code=${exit_code}" >> "${GITHUB_OUTPUT}"
+          exit 0
+
+      - name: Run configured secret scanner
+        continue-on-error: true
+        run: |
+          if [ -n "${EVIDENCEPLANE_SECRET_SCAN_COMMAND}" ]; then
+            bash -lc "${EVIDENCEPLANE_SECRET_SCAN_COMMAND}"
+          fi
+          if [ ! -f evidenceplane-secret-scan.json ]; then
+            printf '{"secret_detected":false,"scanner":"not_configured"}\n' > evidenceplane-secret-scan.json
+          fi
+
+      - name: Build RunReceipt
+        run: |
+          python scripts/github_actions_receipt.py \
+            --output evidenceplane-receipt.json \
+            --junit evidenceplane-pytest.xml \
+            --secret-scan-result evidenceplane-secret-scan.json \
+            --test-exit-code "${PYTEST_EXIT_CODE}" \
+            --test-command "python -m pytest -q --junitxml=evidenceplane-pytest.xml"
+        env:
+          PYTEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+
+      - name: Submit receipt to EvidencePlane
+        run: |
+          python scripts/submit_receipt.py \
+            --file evidenceplane-receipt.json \
+            --url "${EVIDENCEPLANE_URL}" \
+            --pretty > evidenceplane-decision.json
+
+      - name: Publish EvidencePlane check summary
+        id: evidenceplane
+        run: |
+          python scripts/github_actions_feedback.py \
+            --decision-file evidenceplane-decision.json
+
+      - name: Fail if tests failed unexpectedly
+        if: steps.tests.outputs.exit_code != '0' && steps.evidenceplane.outcome == 'success'
+        run: |
+          echo "::error::Tests failed but EvidencePlane did not block."
+          exit 1

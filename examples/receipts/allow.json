@@ -1,0 +1,24 @@
+{
+  "idempotency_key": "example-allow-001",
+  "repo_name": "docs-site",
+  "commit_sha": "1111111111111111111111111111111111111111",
+  "branch": "docs/update-readme",
+  "actor": "ci-bot",
+  "timestamp_utc": "2026-05-06T19:00:00Z",
+  "changed_files": [
+    {
+      "path": "README.md",
+      "classification": "docs",
+      "additions": 10,
+      "deletions": 2,
+      "secret_detected": false
+    }
+  ],
+  "tests": [],
+  "tool_calls": [],
+  "policy_context": {
+    "protected_branch": false,
+    "emergency_override": false,
+    "approver_email": null
+  }
+}

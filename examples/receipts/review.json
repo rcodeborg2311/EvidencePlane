@@ -1,0 +1,29 @@
+{
+  "idempotency_key": "example-review-001",
+  "repo_name": "payments-service",
+  "commit_sha": "2222222222222222222222222222222222222222",
+  "branch": "feature/refactor-refunds",
+  "actor": "ci-bot",
+  "timestamp_utc": "2026-05-06T19:05:00Z",
+  "changed_files": [
+    {
+      "path": "src/refunds.py",
+      "classification": "code",
+      "additions": 30,
+      "deletions": 8,
+      "secret_detected": false
+    }
+  ],
+  "tests": [
+    {
+      "name": "tests/test_placeholder.py::test_stub",
+      "status": "skipped"
+    }
+  ],
+  "tool_calls": [],
+  "policy_context": {
+    "protected_branch": false,
+    "emergency_override": false,
+    "approver_email": null
+  }
+}

@@ -31,7 +31,15 @@ class Run(Base):
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     timestamp_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False, default="1.0")
     risk_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    review_outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reviewer_identity: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     evidence_pack_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     evidence_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

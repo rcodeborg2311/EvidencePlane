@@ -19,9 +19,10 @@ from app.models.schemas import (
 from app.services.evidence import (
     build_evidence_pack,
     compute_evidence_sha256,
+    format_datetime,
     normalized_input,
 )
-from app.services.policy import evaluate_policy
+from app.services.policy import POLICY_VERSION, evaluate_policy
 from app.services.security import sha256_hex
 
 
@@ -35,11 +36,27 @@ def _run_options(statement: Select[tuple[Run]]) -> Select[tuple[Run]]:
     return statement.options(selectinload(Run.violations), selectinload(Run.evidence_pack))
 
 
+def initial_review_status(decision: str) -> str:
+    return "pending" if decision == "review" else "not_required"
+
+
+def _review_fields_from_run(run: Run) -> dict:
+    return {
+        "review_status": run.review_status,
+        "review_outcome": run.review_outcome,
+        "reviewer_identity": run.reviewer_identity,
+        "review_note": run.review_note,
+        "reviewed_at": _as_utc(run.reviewed_at) if run.reviewed_at else None,
+    }
+
+
 def _decision_response_from_run(run: Run) -> DecisionResponse:
     return DecisionResponse(
         run_id=run.id,
         decision=run.decision,
+        policy_version=run.policy_version,
         risk_score=run.risk_score,
+        **_review_fields_from_run(run),
         violations=[
             Violation(code=item.code, message=item.message, severity=item.severity)
             for item in run.violations
@@ -54,10 +71,14 @@ def _summary_from_run(run: Run) -> RunSummary:
     return RunSummary(
         run_id=run.id,
         decision=run.decision,
+        policy_version=run.policy_version,
         risk_score=run.risk_score,
+        **_review_fields_from_run(run),
         repo_name=run.repo_name,
+        branch=run.branch,
         actor=run.actor,
         timestamp_utc=_as_utc(run.timestamp_utc),
+        evidence_sha256=run.evidence_sha256,
         created_at=_as_utc(run.created_at),
     )
 
@@ -67,7 +88,6 @@ def _detail_from_run(run: Run) -> RunDetail:
         **_summary_from_run(run).model_dump(),
         idempotency_key=run.idempotency_key,
         commit_sha=run.commit_sha,
-        branch=run.branch,
         changed_files=run.changed_files,
         tests=run.tests,
         tool_calls=run.tool_calls,
@@ -77,7 +97,6 @@ def _detail_from_run(run: Run) -> RunDetail:
             for item in run.violations
         ],
         evidence_pack_id=run.evidence_pack_id,
-        evidence_sha256=run.evidence_sha256,
     )
 
 
@@ -96,6 +115,7 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
         return _decision_response_from_run(existing)
 
     policy_decision = evaluate_policy(receipt)
+    review_status = initial_review_status(policy_decision.decision)
     run_id = uuid4()
     evidence_pack_id = uuid4()
     created_at = utc_now()
@@ -105,7 +125,13 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
         run_id=run_id,
         receipt=receipt,
         decision=policy_decision.decision,
+        policy_version=POLICY_VERSION,
         risk_score=policy_decision.risk_score,
+        review_status=review_status,
+        review_outcome=None,
+        reviewer_identity=None,
+        review_note=None,
+        reviewed_at=None,
         violations=policy_decision.violations,
         generated_at=created_at,
     )
@@ -121,7 +147,13 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
         actor=receipt.actor,
         timestamp_utc=receipt.timestamp_utc,
         decision=policy_decision.decision,
+        policy_version=POLICY_VERSION,
         risk_score=policy_decision.risk_score,
+        review_status=review_status,
+        review_outcome=None,
+        reviewer_identity=None,
+        review_note=None,
+        reviewed_at=None,
         evidence_pack_id=evidence_pack_id,
         evidence_sha256=evidence_sha256,
         created_at=created_at,
@@ -169,6 +201,59 @@ def get_run_detail(session: Session, run_id: UUID) -> RunDetail:
     if run is None:
         raise EvidencePlaneError(404, "not_found", "Run was not found.")
     return _detail_from_run(run)
+
+
+def _sync_evidence_review_state(run: Run) -> None:
+    if run.evidence_pack is None:
+        raise EvidencePlaneError(
+            503,
+            "service_unavailable",
+            "Evidence pack was not found for review update.",
+        )
+
+    body = deepcopy(run.evidence_pack.body)
+    body["review_status"] = run.review_status
+    body["review_outcome"] = run.review_outcome
+    body["reviewer_identity"] = run.reviewer_identity
+    body["review_note"] = run.review_note
+    body["reviewed_at"] = format_datetime(run.reviewed_at) if run.reviewed_at else None
+    body["evidence_sha256"] = compute_evidence_sha256(body)
+    run.evidence_pack.body = body
+    run.evidence_pack.sha256 = body["evidence_sha256"]
+    run.evidence_sha256 = body["evidence_sha256"]
+
+
+def review_run(
+    session: Session,
+    run_id: UUID,
+    *,
+    outcome: str,
+    reviewer_identity: str,
+    review_note: str | None,
+) -> RunDetail:
+    run = session.scalar(_run_options(select(Run).where(Run.id == run_id)))
+    if run is None:
+        raise EvidencePlaneError(404, "run_not_found", "Run was not found.")
+    if run.review_status != "pending":
+        raise EvidencePlaneError(
+            409,
+            "review_not_pending",
+            "Run does not have a pending review.",
+        )
+
+    reviewed_at = utc_now()
+    run.review_status = outcome
+    run.review_outcome = outcome
+    run.reviewer_identity = reviewer_identity
+    run.review_note = review_note
+    run.reviewed_at = reviewed_at
+    _sync_evidence_review_state(run)
+    session.commit()
+
+    saved = session.scalar(_run_options(select(Run).where(Run.id == run_id)))
+    if saved is None:
+        raise EvidencePlaneError(503, "service_unavailable", "Run could not be loaded.")
+    return _detail_from_run(saved)
 
 
 def get_evidence(session: Session, run_id: UUID) -> dict:
