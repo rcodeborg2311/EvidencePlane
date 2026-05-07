@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}EvidencePlane{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/vendor/pico.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+    <script src="{{ url_for('static', path='/htmx.min.js') }}" defer></script>
+  </head>
+  <body>
+    <header class="app-shell">
+      <nav class="topbar" aria-label="Primary">
+        <a class="brand" href="/">
+          <span class="brand-mark">EP</span>
+          <span>EvidencePlane</span>
+        </a>
+        <span class="environment-pill">MVP v0.1</span>
+      </nav>
+    </header>
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

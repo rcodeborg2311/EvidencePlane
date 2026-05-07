@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: evidenceplane
+          POSTGRES_USER: evidenceplane
+          POSTGRES_PASSWORD: test-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U evidenceplane -d evidenceplane"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://evidenceplane:test-postgres-password@127.0.0.1:5432/evidenceplane
+      EVIDENCEPLANE_HMAC_SECRET: test-hmac-secret
+      ADMIN_TOKEN: test-admin-token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.13"
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+      - name: Compile source
+        run: .venv/bin/python -m compileall app tests scripts
+      - name: Run tests
+        run: .venv/bin/python -m pytest
+      - name: Run migrations
+        run: .venv/bin/alembic upgrade head
+      - name: Smoke test app boot
+        run: |
+          .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/evidenceplane.log 2>&1 &
+          echo $! > /tmp/evidenceplane.pid
+          .venv/bin/python scripts/smoke_test.py --base-url http://127.0.0.1:8000 --secret "$EVIDENCEPLANE_HMAC_SECRET"
+          kill "$(cat /tmp/evidenceplane.pid)"

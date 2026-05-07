@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.run_id }} - EvidencePlane{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="detail-header">
+    <div>
+      <p class="eyebrow">Run detail</p>
+      <h1>{{ run.repo_name }}</h1>
+      <p class="subtle">{{ run.branch }} at {{ run.commit_sha }}</p>
+    </div>
+    <span class="decision-badge decision-{{ run.decision }}">{{ run.decision }}</span>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <span>Risk score</span>
+      <strong>{{ run.risk_score }}</strong>
+    </div>
+    <div class="summary-card">
+      <span>Actor</span>
+      <strong>{{ run.actor }}</strong>
+    </div>
+    <div class="summary-card">
+      <span>Evidence</span>
+      <a class="button" href="/api/v1/evidence/{{ run.run_id }}" download>Download Evidence</a>
+    </div>
+    <div class="summary-card">
+      <span>Run ID</span>
+      <strong>{{ run.run_id }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Violations</h2>
+  {% if run.violations %}
+  <ul class="violations">
+    {% for violation in run.violations %}
+    <li>
+      <span class="severity severity-{{ violation.severity }}">{{ violation.severity }}</span>
+      <strong>{{ violation.code }}</strong>
+      <span>{{ violation.message }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No violations.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <h2>Changed Files</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Path</th>
+          <th>Class</th>
+          <th>Additions</th>
+          <th>Deletions</th>
+          <th>Secret</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for file in run.changed_files %}
+        <tr>
+          <td>{{ file.path }}</td>
+          <td><span class="table-chip">{{ file.classification }}</span></td>
+          <td>{{ file.additions }}</td>
+          <td>{{ file.deletions }}</td>
+          <td>{{ file.secret_detected }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Tool Calls</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Tool</th>
+          <th>Command</th>
+          <th>Network</th>
+          <th>Exit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for tool in run.tool_calls %}
+        <tr>
+          <td>{{ tool.tool }}</td>
+          <td>{{ tool.command }}</td>
+          <td>{{ tool.network_access }}</td>
+          <td>{{ tool.exit_code }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="empty">No tool calls.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <h2>Tests</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for test in run.tests %}
+        <tr>
+          <td>{{ test.name }}</td>
+          <td><span class="table-chip">{{ test.status }}</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="2" class="empty">No tests reported.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
