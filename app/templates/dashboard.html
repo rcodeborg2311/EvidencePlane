@@ -60,7 +60,7 @@
       trusted runner instead of relying on demo data.
     </p>
   </div>
-  <a class="button button-secondary" href="https://github.com/rcodeborg2311/EvidencePlane/blob/mvp/docs/integrations/github-actions.md">Open CI guide</a>
+  <a class="button button-secondary" href="https://github.com/rcodeborg2311/EvidencePlane/blob/main/docs/integrations/github-actions.md">Open CI guide</a>
 </section>
 
 <section class="section" aria-labelledby="latest-runs-table">
@@ -121,7 +121,7 @@
       Start the app, set <code class="inline-code">EVIDENCEPLANE_HMAC_SECRET</code>,
       and submit a contract-valid receipt.
     </p>
-    <pre><code>.venv/bin/python scripts/submit_receipt.py --file examples/receipts/allow.json --url http://127.0.0.1:8000 --pretty</code></pre>
+    <pre><code>.venv/bin/python scripts/submit_receipt.py --file examples/receipts/allow.json --url $EVIDENCEPLANE_URL --pretty</code></pre>
   </div>
   {% endif %}
 </section>

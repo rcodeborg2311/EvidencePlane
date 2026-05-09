@@ -275,6 +275,12 @@
     <h2 id="command-title">Fetch this evidence pack</h2>
     <p>Use this command from a trusted workstation or CI environment.</p>
   </div>
-  <pre><code>curl -sS http://127.0.0.1:8000/api/v1/evidence/{{ run.run_id }}</code></pre>
+  <pre><code id="evidence-curl-cmd">curl -sS $EVIDENCEPLANE_URL/api/v1/evidence/{{ run.run_id }}</code></pre>
+  <script>
+    (function() {
+      var el = document.getElementById("evidence-curl-cmd");
+      if (el) el.textContent = "curl -sS " + window.location.origin + "/api/v1/evidence/{{ run.run_id }}";
+    })();
+  </script>
 </section>
 {% endblock %}
