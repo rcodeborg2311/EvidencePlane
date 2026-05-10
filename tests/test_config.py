@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.config import Settings
+from app.config import Settings, normalize_database_url
 
 
 def test_secret_file_environment_values_are_supported(tmp_path, monkeypatch):
@@ -23,3 +23,21 @@ def test_secret_file_environment_values_are_supported(tmp_path, monkeypatch):
     assert settings.database_url == "sqlite:///secret-file.db"
     assert settings.hmac_secret == "secret-from-file"
     assert settings.admin_token == "admin-from-file"
+
+
+def test_postgresql_database_url_uses_psycopg_driver(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db:5432/evidenceplane")
+    monkeypatch.setenv("EVIDENCEPLANE_HMAC_SECRET", "secret")
+    monkeypatch.setenv("ADMIN_TOKEN", "admin-token")
+
+    settings = Settings.from_env()
+
+    assert settings.database_url == (
+        "postgresql+psycopg://user:pass@db:5432/evidenceplane"
+    )
+
+
+def test_database_url_normalizer_supports_postgres_alias():
+    assert normalize_database_url("postgres://user:pass@db:5432/evidenceplane") == (
+        "postgresql+psycopg://user:pass@db:5432/evidenceplane"
+    )

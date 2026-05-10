@@ -39,7 +39,7 @@ class Settings:
             raise ConfigurationError(f"Missing required environment variable(s): {joined}")
 
         return cls(
-            database_url=str(database_url),
+            database_url=normalize_database_url(str(database_url)),
             hmac_secret=str(hmac_secret),
             admin_token=str(admin_token),
             enable_otel=env_flag("EVIDENCEPLANE_ENABLE_OTEL"),
@@ -58,6 +58,14 @@ def reset_settings_cache() -> None:
 
 def env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgres://")
+    return url
 
 
 def read_secret(name: str) -> str | None:

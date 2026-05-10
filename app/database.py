@@ -5,13 +5,13 @@ from collections.abc import Generator
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import get_settings, normalize_database_url
 
 _ENGINES: dict[str, Engine] = {}
 
 
 def get_engine(database_url: str | None = None) -> Engine:
-    url = database_url or get_settings().database_url
+    url = normalize_database_url(database_url or get_settings().database_url)
     engine = _ENGINES.get(url)
     if engine is not None:
         return engine

@@ -6,6 +6,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.config import normalize_database_url
 from app.models.db import Base
 
 config = context.config
@@ -20,7 +21,7 @@ def database_url() -> str:
     url = os.getenv("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL must be set before running Alembic.")
-    return url
+    return normalize_database_url(url)
 
 
 def run_migrations_offline() -> None:
