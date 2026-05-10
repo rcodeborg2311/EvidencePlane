@@ -29,6 +29,7 @@ def normalized_input(receipt: RunReceipt) -> dict[str, Any]:
 def evidence_hash_body(evidence_pack: dict[str, Any]) -> dict[str, Any]:
     body = deepcopy(evidence_pack)
     body.pop("evidence_sha256", None)
+    body.pop("case", None)  # advisory field appended after sealing; not part of hash
     return body
 
 

@@ -282,6 +282,18 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
 
     session.add(run)
     session.commit()
+
+    # Auto-create a Case Room for review/block decisions
+    from app.services.case_rooms import auto_create_case
+    auto_create_case(
+        session,
+        run_id=run_id,
+        decision=policy_decision.decision,
+        repo_name=receipt.repo_name,
+        branch=receipt.branch,
+        violations=[v.model_dump(mode="json") for v in policy_decision.violations],
+    )
+
     saved = session.scalar(_run_options(select(Run).where(Run.id == run_id)))
     if saved is None:
         raise EvidencePlaneError(503, "service_unavailable", "Run could not be persisted.")
@@ -420,4 +432,20 @@ def get_evidence(session: Session, run_id: UUID) -> dict:
             "service_unavailable",
             "Evidence integrity check failed.",
         )
+
+    # Append case summary outside the sealed hash — advisory context only
+    from app.models.db import Case as _Case
+    case = session.scalar(select(_Case).where(_Case.run_id == run_id))
+    if case is not None:
+        body["case"] = {
+            "case_id": str(case.id),
+            "status": case.status,
+            "case_type": case.case_type,
+            "severity": case.severity,
+            "title": case.title,
+            "resolved_at": case.resolved_at.isoformat() if case.resolved_at else None,
+        }
+    else:
+        body["case"] = None
+
     return body

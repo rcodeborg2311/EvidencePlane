@@ -269,3 +269,103 @@ class EvidenceSourceResponse(BaseModel):
     repo_name: str | None
     last_seen_at: datetime | None
     created_at: datetime
+
+
+# --------------------------------------------------------------------------- #
+# Case Room schemas
+# --------------------------------------------------------------------------- #
+
+CASE_STATUSES = {"open", "resolved", "dismissed"}
+CASE_TYPES = {"review_required", "blocked_change"}
+CASE_SEVERITIES = {"low", "medium", "high"}
+LINK_PROVIDERS = {"slack", "jira", "linear", "github", "azure_devops", "other"}
+LINK_TYPES = {"issue", "thread", "pr", "page", "other"}
+
+
+class CaseMessageRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=5000)
+    author_identity: str = Field(min_length=1, max_length=200)
+
+
+class CaseExternalLinkRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=32)
+    url: str = Field(min_length=1, max_length=500)
+    external_id: str | None = Field(default=None, max_length=200)
+    link_type: str = Field(default="issue", max_length=32)
+    created_by: str | None = Field(default=None, max_length=200)
+
+    @field_validator("provider")
+    @classmethod
+    def validate_provider(cls, v: str) -> str:
+        if v not in LINK_PROVIDERS:
+            raise ValueError(f"provider must be one of: {', '.join(sorted(LINK_PROVIDERS))}")
+        return v
+
+    @field_validator("link_type")
+    @classmethod
+    def validate_link_type(cls, v: str) -> str:
+        if v not in LINK_TYPES:
+            raise ValueError(f"link_type must be one of: {', '.join(sorted(LINK_TYPES))}")
+        return v
+
+
+class CaseResolveRequest(BaseModel):
+    resolved_by: str = Field(min_length=1, max_length=200)
+    resolution_note: str | None = Field(default=None, max_length=1000)
+
+
+class CaseMessageResponse(BaseModel):
+    message_id: UUID
+    author_identity: str
+    body: str
+    message_sha256: str
+    created_at: datetime
+
+
+class CaseEventResponse(BaseModel):
+    event_id: UUID
+    event_type: str
+    actor_identity: str
+    payload: dict | None
+    sequence: int
+    previous_event_sha256: str | None
+    event_sha256: str
+    created_at: datetime
+
+
+class CaseExternalLinkResponse(BaseModel):
+    link_id: UUID
+    provider: str
+    external_id: str | None
+    url: str
+    link_type: str
+    created_by: str | None
+    created_at: datetime
+
+
+class CaseResponse(BaseModel):
+    case_id: UUID
+    run_id: UUID
+    status: str
+    case_type: str
+    severity: str
+    title: str
+    summary: str | None
+    resolved_by: str | None
+    resolution_note: str | None
+    created_at: datetime
+    resolved_at: datetime | None
+    messages: list[CaseMessageResponse] = Field(default_factory=list)
+    events: list[CaseEventResponse] = Field(default_factory=list)
+    external_links: list[CaseExternalLinkResponse] = Field(default_factory=list)
+
+
+class CaseSummary(BaseModel):
+    case_id: UUID
+    run_id: UUID
+    status: str
+    case_type: str
+    severity: str
+    title: str
+    created_at: datetime
+    resolved_at: datetime | None

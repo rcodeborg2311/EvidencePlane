@@ -20,6 +20,11 @@ from app.database import get_session
 from app.errors import EvidencePlaneError
 from app.models.db import Organization, UserSession, ROLES, role_meets
 from app.models.schemas import (
+    CaseExternalLinkRequest,
+    CaseMessageRequest,
+    CaseResponse,
+    CaseResolveRequest,
+    CaseSummary,
     DecisionResponse,
     DryRunRequest,
     DryRunResponse,
@@ -48,6 +53,15 @@ from app.services.github import (
     store_delivery,
     update_check_run_for_run,
     validate_github_signature,
+)
+from app.services.case_rooms import (
+    add_external_link,
+    add_message,
+    dismiss_case,
+    get_case,
+    get_case_for_run,
+    list_cases,
+    resolve_case,
 )
 from app.services.evidence_sources import (
     create_evidence_source,
@@ -525,6 +539,89 @@ def disable_source_endpoint(
     db: Session = Depends(get_session),
 ) -> None:
     disable_evidence_source(db, source_id)
+
+
+# --------------------------------------------------------------------------- #
+# Case Room endpoints
+# --------------------------------------------------------------------------- #
+
+@router.get("/api/v1/cases", response_model=list[CaseSummary])
+def list_cases_endpoint(
+    status: str | None = None,
+    severity: str | None = None,
+    case_type: str | None = None,
+    limit: int = 50,
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> list[CaseSummary]:
+    return list_cases(db, status=status, severity=severity, case_type=case_type, limit=limit)
+
+
+@router.get("/api/v1/cases/{case_id}", response_model=CaseResponse)
+def get_case_endpoint(
+    case_id: UUID,
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> CaseResponse:
+    return get_case(db, case_id)
+
+
+@router.post("/api/v1/cases/{case_id}/resolve", response_model=CaseResponse)
+def resolve_case_endpoint(
+    case_id: UUID,
+    body: CaseResolveRequest,
+    actor: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> CaseResponse:
+    if actor is not None:
+        body = CaseResolveRequest(
+            resolved_by=actor.user.email,
+            resolution_note=body.resolution_note,
+        )
+    return resolve_case(db, case_id, body)
+
+
+@router.post("/api/v1/cases/{case_id}/dismiss", response_model=CaseResponse)
+def dismiss_case_endpoint(
+    case_id: UUID,
+    body: CaseResolveRequest,
+    actor: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> CaseResponse:
+    identity = actor.user.email if actor is not None else body.resolved_by
+    return dismiss_case(db, case_id, identity, note=body.resolution_note)
+
+
+@router.post("/api/v1/cases/{case_id}/messages", response_model=CaseResponse)
+def add_message_endpoint(
+    case_id: UUID,
+    body: CaseMessageRequest,
+    actor: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> CaseResponse:
+    if actor is not None:
+        body = CaseMessageRequest(body=body.body, author_identity=actor.user.email)
+    return add_message(db, case_id, body)
+
+
+@router.post("/api/v1/cases/{case_id}/links", response_model=CaseResponse)
+def add_link_endpoint(
+    case_id: UUID,
+    body: CaseExternalLinkRequest,
+    actor: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> CaseResponse:
+    identity = actor.user.email if actor is not None else (body.created_by or "unknown")
+    return add_external_link(db, case_id, body, actor_identity=identity)
+
+
+@router.get("/api/v1/runs/{run_id}/case", response_model=CaseResponse | None)
+def get_run_case_endpoint(
+    run_id: UUID,
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> CaseResponse | None:
+    return get_case_for_run(db, run_id)
 
 
 @router.get("/")

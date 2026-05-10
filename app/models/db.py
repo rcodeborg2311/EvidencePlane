@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -449,6 +449,119 @@ class GitHubWebhookDelivery(Base):
         DateTime(timezone=True), nullable=True
     )
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class Case(Base):
+    __tablename__ = "cases"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    case_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    severity: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_team_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    messages: Mapped[list["CaseMessage"]] = relationship(
+        "CaseMessage", back_populates="case", cascade="all, delete-orphan",
+        order_by="CaseMessage.created_at"
+    )
+    events: Mapped[list["CaseEvent"]] = relationship(
+        "CaseEvent", back_populates="case", cascade="all, delete-orphan",
+        order_by="CaseEvent.sequence"
+    )
+    external_links: Mapped[list["CaseExternalLink"]] = relationship(
+        "CaseExternalLink", back_populates="case", cascade="all, delete-orphan",
+        order_by="CaseExternalLink.created_at"
+    )
+    participants: Mapped[list["CaseParticipant"]] = relationship(
+        "CaseParticipant", back_populates="case", cascade="all, delete-orphan",
+        order_by="CaseParticipant.added_at"
+    )
+
+
+class CaseParticipant(Base):
+    __tablename__ = "case_participants"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="reviewer")
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[Case] = relationship("Case", back_populates="participants")
+
+
+class CaseMessage(Base):
+    __tablename__ = "case_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    author_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    message_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[Case] = relationship("Case", back_populates="messages")
+
+
+class CaseEvent(Base):
+    __tablename__ = "case_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    actor_identity: Mapped[str] = mapped_column(String(200), nullable=False)
+    payload_json: Mapped[dict | None] = mapped_column(jsonb_type, nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_event_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    event_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[Case] = relationship("Case", back_populates="events")
+
+
+class CaseExternalLink(Base):
+    __tablename__ = "case_external_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    link_type: Mapped[str] = mapped_column(String(32), nullable=False, default="issue")
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[Case] = relationship("Case", back_populates="external_links")
 
 
 class RepoSettings(Base):
