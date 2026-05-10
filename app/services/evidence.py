@@ -86,6 +86,8 @@ def build_evidence_pack(
     reviewed_at: datetime | None,
     violations: list[Violation],
     generated_at: datetime,
+    policy_config_id: str | None = None,
+    policy_config_snapshot: dict | None = None,
 ) -> dict[str, Any]:
     pack: dict[str, Any] = {
         "evidence_pack_id": str(evidence_pack_id),
@@ -93,6 +95,8 @@ def build_evidence_pack(
         "normalized_input": normalized_input(receipt),
         "decision": decision,
         "policy_version": policy_version,
+        "policy_config_id": policy_config_id,
+        "policy_config_snapshot": policy_config_snapshot,
         "risk_score": risk_score,
         "review_status": review_status,
         "review_outcome": review_outcome,

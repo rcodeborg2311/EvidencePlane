@@ -21,6 +21,10 @@ from app.errors import EvidencePlaneError
 from app.models.db import Organization, UserSession, ROLES, role_meets
 from app.models.schemas import (
     DecisionResponse,
+    DryRunRequest,
+    DryRunResponse,
+    PolicyConfigRequest,
+    PolicyConfigResponse,
     ReviewRequest,
     RunDetail,
     RunReceipt,
@@ -42,6 +46,13 @@ from app.services.github import (
     store_delivery,
     update_check_run_for_run,
     validate_github_signature,
+)
+from app.services.policy_config import (
+    create_policy_config,
+    deactivate_policy_config,
+    dry_run_policy_config,
+    get_policy_config,
+    list_policy_configs,
 )
 from app.services.runs import (
     get_evidence,
@@ -417,6 +428,55 @@ def api_evidence(run_id: UUID, session: Session = Depends(get_session)) -> JSONR
             "Content-Disposition": f'attachment; filename="evidence-{run_id}.json"'
         },
     )
+
+
+# --------------------------------------------------------------------------- #
+# Policy config endpoints
+# --------------------------------------------------------------------------- #
+
+@router.post("/api/v1/policy-configs", response_model=PolicyConfigResponse, status_code=201)
+async def create_policy_config_endpoint(
+    body: PolicyConfigRequest,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> PolicyConfigResponse:
+    return create_policy_config(db, body)
+
+
+@router.get("/api/v1/policy-configs", response_model=list[PolicyConfigResponse])
+def list_policy_configs_endpoint(
+    repo_name: str | None = None,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> list[PolicyConfigResponse]:
+    return list_policy_configs(db, repo_name=repo_name)
+
+
+@router.get("/api/v1/policy-configs/{config_id}", response_model=PolicyConfigResponse)
+def get_policy_config_endpoint(
+    config_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> PolicyConfigResponse:
+    return get_policy_config(db, config_id)
+
+
+@router.delete("/api/v1/policy-configs/{config_id}", status_code=204)
+def deactivate_policy_config_endpoint(
+    config_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> None:
+    deactivate_policy_config(db, config_id)
+
+
+@router.post("/api/v1/policy-configs/dry-run", response_model=DryRunResponse)
+def dry_run_policy_config_endpoint(
+    body: DryRunRequest,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> DryRunResponse:
+    return dry_run_policy_config(db, body)
 
 
 @router.get("/")

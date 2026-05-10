@@ -8,7 +8,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.errors import EvidencePlaneError
-from app.models.db import EvidencePack, ReviewEvent, Run, ViolationRecord, utc_now
+from app.models.db import EvidencePack, PolicyConfig, ReviewEvent, Run, ViolationRecord, utc_now
 from app.models.schemas import (
     DecisionResponse,
     ReviewEventSummary,
@@ -25,8 +25,16 @@ from app.services.evidence import (
     format_datetime,
     normalized_input,
 )
-from app.services.policy import POLICY_VERSION, evaluate_policy
+from app.services.policy import POLICY_VERSION, PolicySettings, evaluate_policy
 from app.services.security import sha256_hex
+
+
+def _find_active_policy_config(session: Session, repo_name: str) -> PolicyConfig | None:
+    return session.scalar(
+        select(PolicyConfig)
+        .where(PolicyConfig.repo_name == repo_name, PolicyConfig.is_active.is_(True))
+        .order_by(PolicyConfig.created_at.desc())
+    )
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -178,7 +186,12 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
             )
         return _decision_response_from_run(existing)
 
-    policy_decision = evaluate_policy(receipt)
+    active_config = _find_active_policy_config(session, receipt.repo_name)
+    settings = PolicySettings.from_dict(active_config.config_json) if active_config else PolicySettings()
+    policy_config_id = str(active_config.id) if active_config else None
+    policy_config_snapshot = active_config.config_json if active_config else None
+
+    policy_decision = evaluate_policy(receipt, settings)
     review_status = initial_review_status(policy_decision.decision)
     run_id = uuid4()
     evidence_pack_id = uuid4()
@@ -198,6 +211,8 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
         reviewed_at=None,
         violations=policy_decision.violations,
         generated_at=created_at,
+        policy_config_id=policy_config_id,
+        policy_config_snapshot=policy_config_snapshot,
     )
     evidence_sha256 = evidence_body["evidence_sha256"]
 

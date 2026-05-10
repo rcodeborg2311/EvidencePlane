@@ -486,7 +486,6 @@ async def update_check_run_for_run(
     )
     if check_run is None or check_run.external_check_run_id is None:
         if check_run is not None:
-            check_run.run_id_str = run_id
             check_run.status = "completed"
             check_run.conclusion = _DECISION_TO_CONCLUSION.get(decision, "neutral")
             session.commit()

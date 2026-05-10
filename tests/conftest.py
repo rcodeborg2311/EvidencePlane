@@ -11,11 +11,19 @@ from fastapi.testclient import TestClient
 from app.config import reset_settings_cache
 from app.database import get_engine, reset_database_cache
 from app.main import create_app
-from app.models.db import Base
+from app.models.db import Base, Organization
 from app.services.security import SIGNATURE_HEADER
 
 TEST_SECRET = "test-hmac-secret"
 TEST_WEBHOOK_SECRET = "test-webhook-secret"
+
+
+def _seed_org(engine) -> None:
+    from sqlalchemy.orm import Session
+    with Session(engine) as session:
+        if session.query(Organization).count() == 0:
+            session.add(Organization(name="Test Org", slug="test-org"))
+            session.commit()
 
 
 @pytest.fixture()
@@ -29,6 +37,7 @@ def client(tmp_path, monkeypatch):
 
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _seed_org(engine)
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
@@ -49,6 +58,7 @@ def github_client(tmp_path, monkeypatch):
 
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _seed_org(engine)
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client

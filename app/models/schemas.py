@@ -128,3 +128,71 @@ class RunDetail(RunSummary):
 class ReviewRequest(StrictModel):
     reviewer_identity: str = Field(min_length=1, max_length=200)
     review_note: str | None = Field(default=None, max_length=1000)
+
+
+# --------------------------------------------------------------------------- #
+# Policy config schemas
+# --------------------------------------------------------------------------- #
+
+_VALID_DECISIONS = {"allow", "review", "block"}
+_BLOCK_OR_REVIEW = {"block", "review"}
+
+
+class PolicyConfigPayload(BaseModel):
+    failed_tests: str = Field(default="block")
+    code_without_passing_tests: str = Field(default="review")
+    network_access: str = Field(default="review")
+    large_protected_branch_change: str = Field(default="review")
+    large_change_threshold: int = Field(default=500, ge=1, le=100_000)
+
+    @field_validator("failed_tests")
+    @classmethod
+    def validate_failed_tests(cls, v: str) -> str:
+        if v not in _BLOCK_OR_REVIEW:
+            raise ValueError("failed_tests must be 'block' or 'review'")
+        return v
+
+    @field_validator("code_without_passing_tests", "network_access", "large_protected_branch_change")
+    @classmethod
+    def validate_three_way(cls, v: str) -> str:
+        if v not in _VALID_DECISIONS:
+            raise ValueError("must be 'allow', 'review', or 'block'")
+        return v
+
+
+class PolicyConfigRequest(BaseModel):
+    repo_name: str | None = Field(default=None, max_length=200)
+    config: PolicyConfigPayload = Field(default_factory=PolicyConfigPayload)
+
+
+class PolicyConfigResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    config_id: UUID
+    repo_name: str | None
+    version: int
+    is_active: bool
+    config: dict
+    created_at: datetime
+
+
+class DryRunChange(BaseModel):
+    run_id: UUID
+    repo_name: str
+    old_decision: str
+    new_decision: str
+    violations_added: list[str]
+    violations_removed: list[str]
+
+
+class DryRunRequest(BaseModel):
+    repo_name: str = Field(min_length=1, max_length=200)
+    config: PolicyConfigPayload = Field(default_factory=PolicyConfigPayload)
+    limit: int = Field(default=50, ge=1, le=500)
+
+
+class DryRunResponse(BaseModel):
+    repo_name: str
+    total_runs: int
+    would_change: int
+    changes: list[DryRunChange]
