@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hmac
+import json
 from pathlib import Path
 import time
 from urllib.parse import parse_qs
@@ -33,6 +34,14 @@ from app.services.auth import (
     provision_user,
     resolve_session,
     revoke_session,
+)
+from app.services.github import (
+    handle_installation_event,
+    handle_pull_request_event,
+    mark_delivery_processed,
+    store_delivery,
+    update_check_run_for_run,
+    validate_github_signature,
 )
 from app.services.runs import (
     get_evidence,
@@ -188,6 +197,7 @@ async def post_run(
     receipt: RunReceipt,
     raw_body: bytes = Depends(require_valid_signature),
     session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
 ) -> DecisionResponse:
     started = time.perf_counter()
     response = store_run(session, receipt, raw_body)
@@ -201,7 +211,76 @@ async def post_run(
         duration_ms=round((time.perf_counter() - started) * 1000, 2),
         policy_decision_counts=decision_counts,
     )
+    if settings.github_app_id:
+        base_url = str(request.base_url).rstrip("/")
+        await update_check_run_for_run(
+            session,
+            repo_full_name=receipt.repo_name,
+            head_sha=receipt.commit_sha,
+            decision=response.decision,
+            run_id=str(response.run_id),
+            violations=[v.model_dump() for v in response.violations],
+            app_id=settings.github_app_id,
+            app_private_key=settings.github_app_private_key,
+            base_url=base_url,
+        )
     return response
+
+
+@router.post("/api/v1/github/webhook")
+async def github_webhook(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    session: Session = Depends(get_session),
+) -> JSONResponse:
+    body = await request.body()
+    event_type = request.headers.get("X-GitHub-Event", "")
+    delivery_guid = request.headers.get("X-GitHub-Delivery", "")
+
+    if settings.github_webhook_secret:
+        sig = request.headers.get("X-Hub-Signature-256")
+        if not validate_github_signature(sig, body, settings.github_webhook_secret):
+            raise EvidencePlaneError(
+                401, "invalid_signature", "Invalid webhook signature."
+            )
+
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        raise EvidencePlaneError(400, "invalid_payload", "Webhook body is not valid JSON.")
+
+    inst_data = payload.get("installation") or {}
+    installation_id: int | None = inst_data.get("id") if isinstance(inst_data, dict) else None
+
+    if delivery_guid:
+        delivery = store_delivery(
+            session,
+            delivery_guid=delivery_guid,
+            event_type=event_type,
+            installation_id=installation_id,
+        )
+        if delivery is None:
+            return JSONResponse({"ok": True, "skipped": True})
+
+    error_msg: str | None = None
+    try:
+        if event_type in ("installation", "installation_repositories"):
+            handle_installation_event(session, payload)
+        elif event_type == "pull_request":
+            await handle_pull_request_event(
+                session,
+                payload,
+                app_id=settings.github_app_id,
+                app_private_key=settings.github_app_private_key,
+            )
+    except Exception as exc:
+        error_msg = str(exc)[:500]
+        raise
+    finally:
+        if delivery_guid:
+            mark_delivery_processed(session, delivery_guid, error=error_msg)
+
+    return JSONResponse({"ok": True})
 
 
 @router.get("/api/v1/runs", response_model=list[RunSummary])

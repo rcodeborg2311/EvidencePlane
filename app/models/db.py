@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -337,3 +337,133 @@ class UserSession(Base):
     )
 
     user: Mapped[User] = relationship("User")
+
+
+class GitHubInstallation(Base):
+    __tablename__ = "github_installations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True
+    )
+    installation_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    account_login: Mapped[str] = mapped_column(String(200), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    suspended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    permissions_json: Mapped[dict] = mapped_column(jsonb_type, nullable=False)
+
+    repositories: Mapped[list["GitHubRepository"]] = relationship(
+        "GitHubRepository",
+        back_populates="installation",
+        primaryjoin="GitHubInstallation.installation_id == foreign(GitHubRepository.installation_id)",
+        foreign_keys="GitHubRepository.installation_id",
+    )
+
+
+class GitHubRepository(Base):
+    __tablename__ = "github_repositories"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    installation_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    github_repo_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    owner: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(401), nullable=False, index=True)
+    default_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    private: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    linked_repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True
+    )
+
+    installation: Mapped[GitHubInstallation] = relationship(
+        "GitHubInstallation",
+        back_populates="repositories",
+        primaryjoin="GitHubRepository.installation_id == GitHubInstallation.installation_id",
+        foreign_keys="GitHubRepository.installation_id",
+    )
+
+
+class GitHubPullRequest(Base):
+    __tablename__ = "github_pull_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    github_repo_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    github_pr_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    head_sha: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    base_branch: Mapped[str] = mapped_column(String(200), nullable=False)
+    author_login: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class GitHubCheckRun(Base):
+    __tablename__ = "github_check_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("runs.id", ondelete="SET NULL"), nullable=True
+    )
+    github_repo_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    installation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    external_check_run_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    head_sha: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    pull_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    conclusion: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    html_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pr_comment_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class GitHubWebhookDelivery(Base):
+    __tablename__ = "github_webhook_deliveries"
+
+    delivery_guid: Mapped[str] = mapped_column(String(64), primary_key=True)
+    installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="received")
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class RepoSettings(Base):
+    __tablename__ = "repo_settings"
+    __table_args__ = (
+        UniqueConstraint("repository_id", name="uq_repo_settings_repository_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    repository_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    enforce_block: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    enforce_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    policy_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("policy_configs.id", ondelete="SET NULL"), nullable=True
+    )
+    feedback_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="comment_and_check"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )

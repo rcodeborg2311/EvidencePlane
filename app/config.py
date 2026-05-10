@@ -19,6 +19,9 @@ class Settings:
     admin_token: str
     enable_otel: bool
     enable_docs: bool
+    github_app_id: str | None
+    github_webhook_secret: str | None
+    github_app_private_key: str | None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -44,6 +47,9 @@ class Settings:
             admin_token=str(admin_token),
             enable_otel=env_flag("EVIDENCEPLANE_ENABLE_OTEL"),
             enable_docs=env_flag("EVIDENCEPLANE_ENABLE_DOCS"),
+            github_app_id=read_secret("GITHUB_APP_ID") or None,
+            github_webhook_secret=read_secret("GITHUB_WEBHOOK_SECRET") or None,
+            github_app_private_key=read_secret("GITHUB_APP_PRIVATE_KEY") or None,
         )
 
 

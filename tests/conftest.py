@@ -15,6 +15,7 @@ from app.models.db import Base
 from app.services.security import SIGNATURE_HEADER
 
 TEST_SECRET = "test-hmac-secret"
+TEST_WEBHOOK_SECRET = "test-webhook-secret"
 
 
 @pytest.fixture()
@@ -23,6 +24,26 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("EVIDENCEPLANE_HMAC_SECRET", TEST_SECRET)
     monkeypatch.setenv("ADMIN_TOKEN", "test-admin-token")
+    reset_settings_cache()
+    reset_database_cache()
+
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    app = create_app()
+    with TestClient(app) as test_client:
+        yield test_client
+
+    reset_database_cache()
+    reset_settings_cache()
+
+
+@pytest.fixture()
+def github_client(tmp_path, monkeypatch):
+    db_path = tmp_path / "evidenceplane.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+    monkeypatch.setenv("EVIDENCEPLANE_HMAC_SECRET", TEST_SECRET)
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin-token")
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", TEST_WEBHOOK_SECRET)
     reset_settings_cache()
     reset_database_cache()
 
