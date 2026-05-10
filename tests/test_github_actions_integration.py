@@ -290,6 +290,36 @@ def test_github_actions_feedback_maps_review_to_warning(tmp_path):
     )
 
 
+def test_receipt_builder_handles_empty_test_exit_code(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "ci@example.invalid")
+    _git(repo, "config", "user.name", "CI")
+    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    (repo / "README.md").write_text("# Demo\n\nchanged\n", encoding="utf-8")
+    output = tmp_path / "receipt.json"
+    result = _run(
+        [
+            sys.executable, str(RECEIPT_SCRIPT),
+            "--output", str(output),
+            "--test-exit-code", "",
+        ],
+        cwd=repo,
+        env={
+            "GITHUB_REPOSITORY": "owner/repo",
+            "GITHUB_SHA": "a" * 40,
+            "GITHUB_ACTOR": "ci-bot",
+            "GITHUB_RUN_ID": "99",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    receipt = json.loads(output.read_text(encoding="utf-8"))
+    assert receipt["tests"][0]["status"] == "passed"
+
+
 def test_github_actions_feedback_enforces_block(tmp_path):
     decision = {
         "run_id": "11111111-1111-4111-8111-111111111111",

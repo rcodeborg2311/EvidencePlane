@@ -62,7 +62,7 @@ jobs:
             --output evidenceplane-receipt.json \
             --junit evidenceplane-pytest.xml \
             --secret-scan-result evidenceplane-secret-scan.json \
-            --test-exit-code "${PYTEST_EXIT_CODE}" \
+            --test-exit-code "${PYTEST_EXIT_CODE:-0}" \
             --test-command "python -m pytest -q --junitxml=evidenceplane-pytest.xml"
         env:
           PYTEST_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}

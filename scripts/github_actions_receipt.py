@@ -247,7 +247,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--diff-target")
     parser.add_argument("--junit", action="append", type=Path, default=[])
     parser.add_argument("--secret-scan-result", type=Path)
-    parser.add_argument("--test-exit-code", type=int)
+    parser.add_argument(
+        "--test-exit-code",
+        type=lambda x: int(x) if x and x.strip() else None,
+        default=None,
+    )
     parser.add_argument("--test-tool", default="pytest")
     parser.add_argument("--test-command", default="python -m pytest -q")
     parser.add_argument("--tool-network-access", action="store_true")

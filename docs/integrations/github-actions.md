@@ -55,6 +55,13 @@ Set a repository variable named `EVIDENCEPLANE_SECRET_SCAN_COMMAND` to a command
 gitleaks detect --source . --report-format json --report-path evidenceplane-secret-scan.json --exit-code 0
 ```
 
+**Important:** `EVIDENCEPLANE_SECRET_SCAN_COMMAND` is a repository-level variable. It runs on
+every branch and every PR. If the scanner reports a finding, EvidencePlane will block that run —
+including pull requests that touch only documentation or tests. Only set this variable if you
+want the scanner active for all branches. For pilot demos or testing, prefer committing a
+`evidenceplane-secret-scan.json` file directly in the branch that should simulate a block,
+rather than setting a global scanner command.
+
 The receipt builder understands common scanner-style JSON:
 
 - a non-empty JSON list of findings

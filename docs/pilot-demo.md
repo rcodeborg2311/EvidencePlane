@@ -217,8 +217,22 @@ as cleared.
 ```
 
 **If running via GitHub Actions:**
-Create a PR that modifies a source file (`.py`, `.ts`, `.go`, etc.) and skip or omit tests
-by setting `EVIDENCEPLANE_ENFORCE_REVIEW=false` so CI does not block.
+Create a PR that modifies a source file (`.py`, `.ts`, `.go`, etc.). The test file must
+produce no passing tests — use `@pytest.mark.skip` or equivalent so pytest collects the test
+but does not pass it. If all tests pass, EvidencePlane will correctly return `allow` instead
+of `review`.
+
+Example — mark the test as skipped in the pilot branch:
+
+```python
+import pytest
+
+@pytest.mark.skip(reason="no tests written for this change yet")
+def test_placeholder():
+    pass
+```
+
+`EVIDENCEPLANE_ENFORCE_REVIEW` defaults to `false`, so CI stays green for review decisions.
 
 **Expected EvidencePlane decision:**
 
@@ -299,19 +313,30 @@ EvidencePlane blocks the run immediately. No human review can clear a block.
 ```
 
 **If running via GitHub Actions:**
-Set the repository variable `EVIDENCEPLANE_SECRET_SCAN_COMMAND` to a command that writes:
+The recommended approach is to commit a pre-written `evidenceplane-secret-scan.json` file
+directly in the branch. This scopes the scanner finding to only that branch and avoids
+accidentally blocking every other PR in the repo.
 
-```json
-{"secret_detected": true}
-```
-
-to `evidenceplane-secret-scan.json`. For a demo using a real scanner:
+Create the file in the branch:
 
 ```sh
-EVIDENCEPLANE_SECRET_SCAN_COMMAND='echo "{\"secret_detected\":true}" > evidenceplane-secret-scan.json'
+git checkout -b pilot/fake-secret
+printf '{"secret_detected":true,"paths":["config.env"]}' > evidenceplane-secret-scan.json
+echo "KEY=fake123" > config.env
+git add evidenceplane-secret-scan.json config.env
+git commit -m "add config with fake secret"
+git push
 ```
 
-Or use a real scanner like `gitleaks`.
+> **Warning:** Do not set `EVIDENCEPLANE_SECRET_SCAN_COMMAND` as a repository-level variable
+> when running multiple scenario branches in the same repo. A repo-level scanner command fires
+> on every branch. If the command reports `secret_detected: true`, EvidencePlane will correctly
+> block every run — including the docs-only allow and code-no-tests review scenarios.
+> Scope scanner simulation to a single branch using a committed `evidenceplane-secret-scan.json`
+> file instead.
+
+If you do need a real scanner for production, set `EVIDENCEPLANE_SECRET_SCAN_COMMAND` after
+completing the other scenarios, or use a separate repo for the block scenario.
 
 **Expected EvidencePlane decision:**
 
