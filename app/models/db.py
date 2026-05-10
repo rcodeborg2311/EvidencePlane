@@ -7,6 +7,17 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Uni
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+# Valid roles in ascending privilege order.
+ROLES = ("viewer", "integration_admin", "reviewer", "admin", "owner")
+
+
+def role_meets(user_role: str, required: str) -> bool:
+    """Return True if user_role is at least as privileged as required."""
+    try:
+        return ROLES.index(user_role) >= ROLES.index(required)
+    except ValueError:
+        return False
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -298,3 +309,31 @@ class ReviewEvent(Base):
     event_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
 
     run: Mapped[Run] = relationship("Run", back_populates="review_events")
+
+
+class UserSession(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    user: Mapped[User] = relationship("User")

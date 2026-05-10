@@ -137,17 +137,20 @@ def test_missing_admin_token_returns_401(client):
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "admin_auth_required"
+    assert response.json()["error"]["code"] == "auth_required"
 
 
-def test_invalid_admin_token_returns_403(client):
+def test_invalid_admin_token_returns_401(client):
     created = post_receipt(client, review_receipt("invalid-admin"))
     run_id = created.json()["run_id"]
 
     response = approve(client, run_id, token="wrong-token")
 
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "admin_auth_invalid"
+    # Unknown token is unauthenticated (401), not forbidden (403).
+    # 403 would mean authenticated-but-unauthorized; an unrecognised token
+    # is not authenticated at all.
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_token"
 
 
 def test_approving_non_pending_run_returns_409(client):

@@ -10,20 +10,30 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import get_session
 from app.errors import EvidencePlaneError
+from app.models.db import Organization, UserSession, ROLES, role_meets
 from app.models.schemas import (
     DecisionResponse,
     ReviewRequest,
     RunDetail,
     RunReceipt,
     RunSummary,
+    StrictModel,
 )
 from app.observability import log_event, record_policy_decision
+from app.services.auth import (
+    check_role,
+    issue_session,
+    provision_user,
+    resolve_session,
+    revoke_session,
+)
 from app.services.runs import (
     get_evidence,
     get_run_detail,
@@ -70,23 +80,80 @@ async def require_valid_signature(
     return body
 
 
+def _extract_bearer(request: Request) -> str | None:
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        token = header.removeprefix("Bearer ").strip()
+        return token if token else None
+    return None
+
+
+def _is_break_glass(token: str, settings: Settings) -> bool:
+    return bool(token) and hmac.compare_digest(token, settings.admin_token)
+
+
+def require_reviewer(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_session),
+) -> UserSession | None:
+    """Require at least reviewer role. Falls back to break-glass ADMIN_TOKEN."""
+    token = _extract_bearer(request)
+    if token is None:
+        raise EvidencePlaneError(401, "auth_required", "Bearer token is required.")
+    if _is_break_glass(token, settings):
+        return None  # break-glass; caller treats None as superuser
+    user_session = resolve_session(db, token)
+    check_role(user_session, "reviewer")
+    return user_session
+
+
 def require_admin(
-    request: Request, settings: Settings = Depends(get_settings)
-) -> None:
-    header = request.headers.get("Authorization")
-    if header is None or not header.startswith("Bearer "):
-        raise EvidencePlaneError(
-            401,
-            "admin_auth_required",
-            "Admin bearer token is required.",
-        )
-    supplied = header.removeprefix("Bearer ").strip()
-    if not supplied or not hmac.compare_digest(supplied, settings.admin_token):
-        raise EvidencePlaneError(
-            403,
-            "admin_auth_invalid",
-            "Admin bearer token is invalid.",
-        )
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_session),
+) -> UserSession | None:
+    """Require at least admin role. Falls back to break-glass ADMIN_TOKEN."""
+    token = _extract_bearer(request)
+    if token is None:
+        raise EvidencePlaneError(401, "auth_required", "Bearer token is required.")
+    if _is_break_glass(token, settings):
+        return None
+    user_session = resolve_session(db, token)
+    check_role(user_session, "admin")
+    return user_session
+
+
+# --------------------------------------------------------------------------- #
+# Auth request/response schemas
+# --------------------------------------------------------------------------- #
+
+class ProvisionUserRequest(StrictModel):
+    email: str = Field(min_length=1, max_length=254)
+    display_name: str | None = Field(default=None, max_length=200)
+    role: str = Field(default="reviewer")
+
+    @field_validator("role")
+    @classmethod
+    def role_must_be_valid(cls, value: str) -> str:
+        if value not in ROLES:
+            raise ValueError(f"role must be one of: {', '.join(ROLES)}")
+        return value
+
+
+class ProvisionUserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    user_id: str
+    email: str
+    role: str
+    token: str
+
+
+class IssueSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    session_id: str
+    role: str
+    token: str
 
 
 async def parse_review_request(request: Request) -> ReviewRequest:
@@ -151,15 +218,18 @@ def api_run_detail(run_id: UUID, session: Session = Depends(get_session)) -> Run
 async def approve_run_review(
     run_id: UUID,
     request: Request,
-    _: None = Depends(require_admin),
+    actor: UserSession | None = Depends(require_reviewer),
     session: Session = Depends(get_session),
 ) -> RunDetail:
     review = await parse_review_request(request)
+    identity = (
+        actor.user.email if actor is not None else review.reviewer_identity
+    )
     return review_run(
         session,
         run_id,
         outcome="approved",
-        reviewer_identity=review.reviewer_identity,
+        reviewer_identity=identity,
         review_note=review.review_note,
     )
 
@@ -168,17 +238,86 @@ async def approve_run_review(
 async def reject_run_review(
     run_id: UUID,
     request: Request,
-    _: None = Depends(require_admin),
+    actor: UserSession | None = Depends(require_reviewer),
     session: Session = Depends(get_session),
 ) -> RunDetail:
     review = await parse_review_request(request)
+    identity = (
+        actor.user.email if actor is not None else review.reviewer_identity
+    )
     return review_run(
         session,
         run_id,
         outcome="rejected",
-        reviewer_identity=review.reviewer_identity,
+        reviewer_identity=identity,
         review_note=review.review_note,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Auth endpoints
+# --------------------------------------------------------------------------- #
+
+@router.post("/api/v1/auth/users", response_model=ProvisionUserResponse)
+async def create_user(
+    body: ProvisionUserRequest,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> ProvisionUserResponse:
+    from app.models.db import Organization
+    from sqlalchemy import select as _select
+    org = db.scalar(_select(Organization).limit(1))
+    if org is None:
+        raise EvidencePlaneError(500, "no_organization", "No organization found.")
+    user, token = provision_user(
+        db,
+        organization_id=org.id,
+        email=body.email,
+        display_name=body.display_name,
+        role=body.role,
+    )
+    return ProvisionUserResponse(
+        user_id=str(user.id),
+        email=user.email,
+        role=body.role,
+        token=token,
+    )
+
+
+@router.post("/api/v1/auth/sessions", response_model=IssueSessionResponse)
+async def create_session(
+    request: Request,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> IssueSessionResponse:
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not user_id:
+        raise EvidencePlaneError(422, "validation_error", "user_id is required.")
+    from app.models.db import Organization
+    from sqlalchemy import select as _select
+    org = db.scalar(_select(Organization).limit(1))
+    if org is None:
+        raise EvidencePlaneError(500, "no_organization", "No organization found.")
+    user_session, token = issue_session(
+        db, user_id=UUID(user_id), organization_id=org.id
+    )
+    return IssueSessionResponse(
+        session_id=str(user_session.id),
+        role=user_session.role,
+        token=token,
+    )
+
+
+@router.delete("/api/v1/auth/sessions/current", status_code=204)
+async def revoke_current_session(
+    request: Request,
+    db: Session = Depends(get_session),
+) -> None:
+    token = _extract_bearer(request)
+    if token is None:
+        raise EvidencePlaneError(401, "auth_required", "Bearer token is required.")
+    revoke_session(db, token)
 
 
 @router.get("/api/v1/evidence/{run_id}")
