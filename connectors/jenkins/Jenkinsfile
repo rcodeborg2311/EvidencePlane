@@ -1,0 +1,52 @@
+// EvidencePlane Jenkins pipeline integration
+// Add the evidenceplane stage to your existing Jenkinsfile.
+//
+// Required Jenkins credentials:
+//   evidenceplane-hmac-secret — Secret Text credential containing the signing secret
+//
+// Required Jenkins environment variables (Manage Jenkins > System):
+//   EVIDENCEPLANE_URL — base URL of your EvidencePlane instance
+
+pipeline {
+    agent any
+
+    environment {
+        EVIDENCEPLANE_HMAC_SECRET = credentials('evidenceplane-hmac-secret')
+    }
+
+    stages {
+        stage('Test') {
+            steps {
+                sh 'python -m pytest --junitxml=report.xml'
+            }
+            post {
+                always {
+                    junit 'report.xml'
+                }
+            }
+        }
+
+        stage('EvidencePlane') {
+            steps {
+                script {
+                    withEnv(["EP_TEST_REPORT_XML=report.xml"]) {
+                        def exitCode = sh(
+                            script: 'python connectors/jenkins/connector.py',
+                            returnStatus: true
+                        )
+                        if (exitCode == 1) {
+                            error("EvidencePlane: decision is BLOCK — pipeline halted.")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Dry-run: set EVIDENCEPLANE_DRY_RUN=1 to preview receipt without submitting
+            echo "EvidencePlane stage complete."
+        }
+    }
+}

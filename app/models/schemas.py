@@ -42,7 +42,32 @@ class PolicyContext(StrictModel):
     approver_email: str | None
 
 
+class PullRequestRef(StrictModel):
+    provider: Literal["github", "gitlab", "bitbucket", "azure_devops"] = "github"
+    number: int = Field(ge=1)
+    url: str = Field(min_length=1, max_length=500)
+    head_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    base_branch: str = Field(min_length=1, max_length=200)
+
+
+class ScannerResult(StrictModel):
+    scanner: str = Field(min_length=1, max_length=100)
+    finding_type: Literal["secret", "vulnerability", "sast", "license", "other"]
+    severity: Severity
+    path: str | None = None
+    message: str = Field(min_length=1, max_length=1000)
+    rule_id: str | None = None
+
+
+class ArtifactRef(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=1, max_length=500)
+    artifact_type: Literal["test_report", "coverage", "sast_report", "build_log", "other"] = "other"
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
 class RunReceipt(StrictModel):
+    # v1 fields — always required
     idempotency_key: str = Field(min_length=1, max_length=64)
     repo_name: str = Field(min_length=1, max_length=200)
     commit_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
@@ -53,6 +78,13 @@ class RunReceipt(StrictModel):
     tests: list[TestResult]
     tool_calls: list[ToolCall]
     policy_context: PolicyContext
+    # v2 fields — optional, backward-compatible
+    schema_version: str = Field(default="1.0", max_length=16)
+    source_id: str | None = Field(default=None, max_length=64)
+    source_run_url: str | None = Field(default=None, max_length=500)
+    pull_request: PullRequestRef | None = None
+    scanner_results: list[ScannerResult] = Field(default_factory=list)
+    artifact_refs: list[ArtifactRef] = Field(default_factory=list)
 
     @field_validator("timestamp_utc")
     @classmethod
@@ -196,3 +228,44 @@ class DryRunResponse(BaseModel):
     total_runs: int
     would_change: int
     changes: list[DryRunChange]
+
+
+# --------------------------------------------------------------------------- #
+# Evidence source schemas
+# --------------------------------------------------------------------------- #
+
+SOURCE_TYPES = {"github_actions", "gitlab_ci", "jenkins", "buildkite", "circleci", "azure_devops", "agent_wrapper", "mcp_adapter", "other"}
+TRUST_LEVELS = {"ci_verified", "agent_managed", "human_submitted"}
+
+
+class EvidenceSourceRequest(BaseModel):
+    source_type: str = Field(min_length=1, max_length=32)
+    display_name: str = Field(min_length=1, max_length=200)
+    signing_secret: str | None = Field(default=None, min_length=16, max_length=256)
+    trust_level: str = Field(default="ci_verified")
+    repo_name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("source_type")
+    @classmethod
+    def validate_source_type(cls, v: str) -> str:
+        if v not in SOURCE_TYPES:
+            raise ValueError(f"source_type must be one of: {', '.join(sorted(SOURCE_TYPES))}")
+        return v
+
+    @field_validator("trust_level")
+    @classmethod
+    def validate_trust_level(cls, v: str) -> str:
+        if v not in TRUST_LEVELS:
+            raise ValueError(f"trust_level must be one of: {', '.join(sorted(TRUST_LEVELS))}")
+        return v
+
+
+class EvidenceSourceResponse(BaseModel):
+    source_id: UUID
+    source_type: str
+    display_name: str
+    trust_level: str
+    enabled: bool
+    repo_name: str | None
+    last_seen_at: datetime | None
+    created_at: datetime

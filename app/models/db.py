@@ -148,6 +148,7 @@ class EvidenceSource(Base):
     )
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    repo_name: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     signing_secret_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
     trust_level: Mapped[str] = mapped_column(
         String(32), nullable=False, default="ci_verified"
@@ -230,6 +231,11 @@ class Run(Base):
     tests: Mapped[list] = mapped_column(jsonb_type, nullable=False)
     tool_calls: Mapped[list] = mapped_column(jsonb_type, nullable=False)
     policy_context: Mapped[dict] = mapped_column(jsonb_type, nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(16), nullable=False, default="1.0")
+    source_run_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pull_request_json: Mapped[dict | None] = mapped_column(jsonb_type, nullable=True)
+    scanner_results_json: Mapped[list | None] = mapped_column(jsonb_type, nullable=True)
+    artifact_refs_json: Mapped[list | None] = mapped_column(jsonb_type, nullable=True)
 
     violations: Mapped[list[ViolationRecord]] = relationship(
         "ViolationRecord",

@@ -1,0 +1,48 @@
+# EvidencePlane GitLab CI integration
+# Add this job to your existing .gitlab-ci.yml pipeline.
+#
+# Required CI/CD variables (Settings > CI/CD > Variables):
+#   EVIDENCEPLANE_URL         — your EvidencePlane instance URL
+#   EVIDENCEPLANE_HMAC_SECRET — masked signing secret for this source
+#
+# Optional:
+#   EVIDENCEPLANE_SOURCE_ID   — UUID from POST /api/v1/sources
+#   EP_TEST_REPORT_XML        — path to JUnit XML output (e.g. report.xml)
+
+stages:
+  - test
+  - evidenceplane
+
+test:
+  stage: test
+  script:
+    - python -m pytest --junitxml=report.xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+    paths:
+      - report.xml
+
+evidenceplane-submit:
+  stage: evidenceplane
+  image: python:3.12-slim
+  needs: [test]
+  when: always
+  script:
+    - pip install --quiet requests
+    - python connectors/gitlab-ci/connector.py
+  variables:
+    EP_TEST_REPORT_XML: report.xml
+  # To preview the receipt without submitting:
+  # EVIDENCEPLANE_DRY_RUN: "1"
+
+evidenceplane-dry-run:
+  stage: evidenceplane
+  image: python:3.12-slim
+  when: manual
+  script:
+    - python connectors/gitlab-ci/connector.py
+  variables:
+    EVIDENCEPLANE_DRY_RUN: "1"
+    EP_TEST_REPORT_XML: report.xml

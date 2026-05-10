@@ -8,7 +8,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.errors import EvidencePlaneError
-from app.models.db import EvidencePack, PolicyConfig, ReviewEvent, Run, ViolationRecord, utc_now
+from app.models.db import EvidencePack, EvidenceSource, PolicyConfig, ReviewEvent, Run, ViolationRecord, utc_now
 from app.models.schemas import (
     DecisionResponse,
     ReviewEventSummary,
@@ -191,6 +191,20 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
     policy_config_id = str(active_config.id) if active_config else None
     policy_config_snapshot = active_config.config_json if active_config else None
 
+    # Resolve evidence source from v2 source_id field
+    evidence_source: EvidenceSource | None = None
+    if receipt.source_id:
+        try:
+            from uuid import UUID as _UUID
+            source_uuid = _UUID(receipt.source_id)
+            evidence_source = session.get(EvidenceSource, source_uuid)
+            if evidence_source and not evidence_source.enabled:
+                evidence_source = None
+        except (ValueError, AttributeError):
+            pass
+    if evidence_source is not None:
+        evidence_source.last_seen_at = utc_now()
+
     policy_decision = evaluate_policy(receipt, settings)
     review_status = initial_review_status(policy_decision.decision)
     run_id = uuid4()
@@ -241,6 +255,12 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
         tests=normalized["tests"],
         tool_calls=normalized["tool_calls"],
         policy_context=normalized["policy_context"],
+        schema_version=receipt.schema_version,
+        source_run_url=receipt.source_run_url,
+        pull_request_json=receipt.pull_request.model_dump(mode="json") if receipt.pull_request else None,
+        scanner_results_json=[r.model_dump(mode="json") for r in receipt.scanner_results] or None,
+        artifact_refs_json=[a.model_dump(mode="json") for a in receipt.artifact_refs] or None,
+        evidence_source_id=evidence_source.id if evidence_source else None,
     )
     run.violations = [
         ViolationRecord(

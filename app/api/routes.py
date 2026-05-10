@@ -23,6 +23,8 @@ from app.models.schemas import (
     DecisionResponse,
     DryRunRequest,
     DryRunResponse,
+    EvidenceSourceRequest,
+    EvidenceSourceResponse,
     PolicyConfigRequest,
     PolicyConfigResponse,
     ReviewRequest,
@@ -46,6 +48,12 @@ from app.services.github import (
     store_delivery,
     update_check_run_for_run,
     validate_github_signature,
+)
+from app.services.evidence_sources import (
+    create_evidence_source,
+    disable_evidence_source,
+    get_evidence_source,
+    list_evidence_sources,
 )
 from app.services.policy_config import (
     create_policy_config,
@@ -477,6 +485,46 @@ def dry_run_policy_config_endpoint(
     db: Session = Depends(get_session),
 ) -> DryRunResponse:
     return dry_run_policy_config(db, body)
+
+
+# --------------------------------------------------------------------------- #
+# Evidence source endpoints
+# --------------------------------------------------------------------------- #
+
+@router.post("/api/v1/sources", response_model=EvidenceSourceResponse, status_code=201)
+def create_source_endpoint(
+    body: EvidenceSourceRequest,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> EvidenceSourceResponse:
+    return create_evidence_source(db, body)
+
+
+@router.get("/api/v1/sources", response_model=list[EvidenceSourceResponse])
+def list_sources_endpoint(
+    include_disabled: bool = False,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> list[EvidenceSourceResponse]:
+    return list_evidence_sources(db, include_disabled=include_disabled)
+
+
+@router.get("/api/v1/sources/{source_id}", response_model=EvidenceSourceResponse)
+def get_source_endpoint(
+    source_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> EvidenceSourceResponse:
+    return get_evidence_source(db, source_id)
+
+
+@router.delete("/api/v1/sources/{source_id}", status_code=204)
+def disable_source_endpoint(
+    source_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> None:
+    disable_evidence_source(db, source_id)
 
 
 @router.get("/")

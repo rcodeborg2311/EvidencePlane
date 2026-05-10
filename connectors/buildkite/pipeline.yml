@@ -1,0 +1,31 @@
+# EvidencePlane Buildkite pipeline integration
+# Add the evidenceplane step to your pipeline.yml.
+#
+# Required (set in Buildkite pipeline settings or via buildkite-agent env):
+#   EVIDENCEPLANE_URL         — your EvidencePlane instance URL
+#   EVIDENCEPLANE_HMAC_SECRET — signing secret (use Buildkite secrets plugin)
+#
+# Optional:
+#   EVIDENCEPLANE_SOURCE_ID   — UUID from POST /api/v1/sources
+
+steps:
+  - label: ":test_tube: Tests"
+    command: python -m pytest --junitxml=report.xml
+    artifact_paths: "report.xml"
+
+  - label: ":shield: EvidencePlane"
+    depends_on: "tests"
+    allow_dependency_failure: true
+    command: |
+      buildkite-agent artifact download report.xml .
+      python connectors/buildkite/connector.py
+    env:
+      EP_TEST_REPORT_XML: "report.xml"
+    # To preview without submitting, add:
+    # EVIDENCEPLANE_DRY_RUN: "1"
+
+  - label: ":mag: EvidencePlane Dry Run"
+    command: python connectors/buildkite/connector.py
+    env:
+      EVIDENCEPLANE_DRY_RUN: "1"
+    if: build.env("EVIDENCEPLANE_DRY_RUN") == "1"
