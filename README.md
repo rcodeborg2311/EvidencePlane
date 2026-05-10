@@ -198,6 +198,13 @@ Stop the stack:
 docker compose down
 ```
 
+## Railway Deployment
+
+Railway deployments use `railway.json` for the start command, healthcheck, and
+US East replica configuration. Set `DATABASE_URL` on the web service with a
+PostgreSQL reference such as `${{Postgres.DATABASE_URL}}`, then redeploy the
+web service.
+
 ## Tests And Checks
 
 ```sh
