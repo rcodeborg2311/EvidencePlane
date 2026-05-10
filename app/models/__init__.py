@@ -1,4 +1,4 @@
-from app.models.db import Base, EvidencePack, Run, ViolationRecord
+from app.models.db import Base, EvidencePack, ReviewEvent, Run, ViolationRecord
 from app.models.schemas import (
     ChangedFile,
     DecisionResponse,
@@ -15,6 +15,7 @@ __all__ = [
     "DecisionResponse",
     "EvidencePack",
     "PolicyContext",
+    "ReviewEvent",
     "Run",
     "RunReceipt",
     "TestResult",

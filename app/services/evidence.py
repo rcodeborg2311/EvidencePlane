@@ -36,6 +36,41 @@ def compute_evidence_sha256(evidence_pack: dict[str, Any]) -> str:
     return canonical_sha256(evidence_hash_body(evidence_pack))
 
 
+def review_event_hash_body(review_event: dict[str, Any]) -> dict[str, Any]:
+    body = deepcopy(review_event)
+    body.pop("event_sha256", None)
+    return body
+
+
+def compute_review_event_sha256(review_event: dict[str, Any]) -> str:
+    return canonical_sha256(review_event_hash_body(review_event))
+
+
+def build_review_event(
+    *,
+    event_id: UUID,
+    run_id: UUID,
+    sequence: int,
+    action: str,
+    actor: str,
+    reason: str | None,
+    created_at: datetime,
+    previous_event_sha256: str | None,
+) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "event_id": str(event_id),
+        "run_id": str(run_id),
+        "sequence": sequence,
+        "action": action,
+        "actor": actor,
+        "reason": reason,
+        "created_at": format_datetime(created_at),
+        "previous_event_sha256": previous_event_sha256,
+    }
+    event["event_sha256"] = compute_review_event_sha256(event)
+    return event
+
+
 def build_evidence_pack(
     *,
     evidence_pack_id: UUID,
@@ -64,6 +99,7 @@ def build_evidence_pack(
         "reviewer_identity": reviewer_identity,
         "review_note": review_note,
         "reviewed_at": format_datetime(reviewed_at) if reviewed_at else None,
+        "review_events": [],
         "violations": [violation.model_dump(mode="json") for violation in violations],
         "generated_at": format_datetime(generated_at),
         "version": "1.0",

@@ -138,6 +138,28 @@
   {% endif %}
 </section>
 
+{% if run.review_events %}
+<section class="review-history-panel" aria-labelledby="review-history-title">
+  <div>
+    <p class="eyebrow">Review audit trail</p>
+    <h2 id="review-history-title">Review history</h2>
+  </div>
+  <ol class="review-history-list">
+    {% for event in run.review_events %}
+    <li>
+      <div class="review-history-header">
+        <span class="review-badge review-{{ event.action }}">{{ event.action }}</span>
+        <strong>{{ event.actor }}</strong>
+        <time datetime="{{ event.created_at|iso_z }}">{{ event.created_at|iso_z }}</time>
+      </div>
+      {% if event.reason %}<blockquote>{{ event.reason }}</blockquote>{% endif %}
+      <code class="hash-preview">{{ event.event_sha256[:12] }}</code>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
+
 <section class="section" aria-labelledby="policy-outcome-title">
   <div class="section-heading">
     <div>

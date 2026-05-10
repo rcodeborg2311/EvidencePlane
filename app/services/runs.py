@@ -8,9 +8,10 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.errors import EvidencePlaneError
-from app.models.db import EvidencePack, Run, ViolationRecord, utc_now
+from app.models.db import EvidencePack, ReviewEvent, Run, ViolationRecord, utc_now
 from app.models.schemas import (
     DecisionResponse,
+    ReviewEventSummary,
     RunDetail,
     RunReceipt,
     RunSummary,
@@ -18,7 +19,9 @@ from app.models.schemas import (
 )
 from app.services.evidence import (
     build_evidence_pack,
+    build_review_event,
     compute_evidence_sha256,
+    compute_review_event_sha256,
     format_datetime,
     normalized_input,
 )
@@ -33,7 +36,11 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def _run_options(statement: Select[tuple[Run]]) -> Select[tuple[Run]]:
-    return statement.options(selectinload(Run.violations), selectinload(Run.evidence_pack))
+    return statement.options(
+        selectinload(Run.violations),
+        selectinload(Run.evidence_pack),
+        selectinload(Run.review_events),
+    )
 
 
 def initial_review_status(decision: str) -> str:
@@ -83,7 +90,61 @@ def _summary_from_run(run: Run) -> RunSummary:
     )
 
 
+def _review_event_body_from_record(event: ReviewEvent) -> dict:
+    body = {
+        "event_id": str(event.id),
+        "run_id": str(event.run_id),
+        "sequence": event.sequence,
+        "action": event.action,
+        "actor": event.actor,
+        "reason": event.reason,
+        "created_at": format_datetime(_as_utc(event.created_at)),
+        "previous_event_sha256": event.previous_event_sha256,
+        "event_sha256": event.event_sha256,
+    }
+    if compute_review_event_sha256(body) != event.event_sha256:
+        raise EvidencePlaneError(
+            503,
+            "service_unavailable",
+            "Review event integrity check failed.",
+        )
+    return body
+
+
+def _review_event_bodies_from_records(events: list[ReviewEvent]) -> list[dict]:
+    previous_event_sha256 = None
+    bodies = []
+    for expected_sequence, event in enumerate(events, start=1):
+        body = _review_event_body_from_record(event)
+        if (
+            body["sequence"] != expected_sequence
+            or body["previous_event_sha256"] != previous_event_sha256
+        ):
+            raise EvidencePlaneError(
+                503,
+                "service_unavailable",
+                "Review event chain integrity check failed.",
+            )
+        previous_event_sha256 = body["event_sha256"]
+        bodies.append(body)
+    return bodies
+
+
+def _review_event_summary_from_record(event: ReviewEvent) -> ReviewEventSummary:
+    return ReviewEventSummary(
+        event_id=event.id,
+        sequence=event.sequence,
+        action=event.action,
+        actor=event.actor,
+        reason=event.reason,
+        created_at=_as_utc(event.created_at),
+        previous_event_sha256=event.previous_event_sha256,
+        event_sha256=event.event_sha256,
+    )
+
+
 def _detail_from_run(run: Run) -> RunDetail:
+    _review_event_bodies_from_records(run.review_events)
     return RunDetail(
         **_summary_from_run(run).model_dump(),
         idempotency_key=run.idempotency_key,
@@ -97,6 +158,9 @@ def _detail_from_run(run: Run) -> RunDetail:
             for item in run.violations
         ],
         evidence_pack_id=run.evidence_pack_id,
+        review_events=[
+            _review_event_summary_from_record(event) for event in run.review_events
+        ],
     )
 
 
@@ -203,7 +267,7 @@ def get_run_detail(session: Session, run_id: UUID) -> RunDetail:
     return _detail_from_run(run)
 
 
-def _sync_evidence_review_state(run: Run) -> None:
+def _sync_evidence_review_state(run: Run) -> bool:
     if run.evidence_pack is None:
         raise EvidencePlaneError(
             503,
@@ -216,11 +280,17 @@ def _sync_evidence_review_state(run: Run) -> None:
     body["review_outcome"] = run.review_outcome
     body["reviewer_identity"] = run.reviewer_identity
     body["review_note"] = run.review_note
-    body["reviewed_at"] = format_datetime(run.reviewed_at) if run.reviewed_at else None
+    body["reviewed_at"] = (
+        format_datetime(_as_utc(run.reviewed_at)) if run.reviewed_at else None
+    )
+    body["review_events"] = _review_event_bodies_from_records(run.review_events)
     body["evidence_sha256"] = compute_evidence_sha256(body)
+    if body == run.evidence_pack.body and body["evidence_sha256"] == run.evidence_sha256:
+        return False
     run.evidence_pack.body = body
     run.evidence_pack.sha256 = body["evidence_sha256"]
     run.evidence_sha256 = body["evidence_sha256"]
+    return True
 
 
 def review_run(
@@ -242,6 +312,32 @@ def review_run(
         )
 
     reviewed_at = utc_now()
+    last_event = run.review_events[-1] if run.review_events else None
+    event_id = uuid4()
+    sequence = (last_event.sequence if last_event else 0) + 1
+    event_body = build_review_event(
+        event_id=event_id,
+        run_id=run.id,
+        sequence=sequence,
+        action=outcome,
+        actor=reviewer_identity,
+        reason=review_note,
+        created_at=reviewed_at,
+        previous_event_sha256=last_event.event_sha256 if last_event else None,
+    )
+    run.review_events.append(
+        ReviewEvent(
+            id=event_id,
+            run_id=run.id,
+            sequence=sequence,
+            action=outcome,
+            actor=reviewer_identity,
+            reason=review_note,
+            created_at=reviewed_at,
+            previous_event_sha256=last_event.event_sha256 if last_event else None,
+            event_sha256=event_body["event_sha256"],
+        )
+    )
     run.review_status = outcome
     run.review_outcome = outcome
     run.reviewer_identity = reviewer_identity
@@ -257,15 +353,33 @@ def review_run(
 
 
 def get_evidence(session: Session, run_id: UUID) -> dict:
-    evidence_pack = session.scalar(
-        select(EvidencePack).where(EvidencePack.run_id == run_id)
-    )
-    if evidence_pack is None:
+    run = session.scalar(_run_options(select(Run).where(Run.id == run_id)))
+    if run is None or run.evidence_pack is None:
         raise EvidencePlaneError(404, "not_found", "Evidence pack was not found.")
 
-    body = deepcopy(evidence_pack.body)
+    body = deepcopy(run.evidence_pack.body)
     computed = compute_evidence_sha256(body)
-    if computed != evidence_pack.sha256 or body.get("evidence_sha256") != evidence_pack.sha256:
+    if (
+        computed != run.evidence_pack.sha256
+        or body.get("evidence_sha256") != run.evidence_pack.sha256
+    ):
+        raise EvidencePlaneError(
+            503,
+            "service_unavailable",
+            "Evidence integrity check failed.",
+        )
+
+    changed = _sync_evidence_review_state(run)
+    if changed:
+        session.commit()
+        session.refresh(run.evidence_pack)
+
+    body = deepcopy(run.evidence_pack.body)
+    computed = compute_evidence_sha256(body)
+    if (
+        computed != run.evidence_pack.sha256
+        or body.get("evidence_sha256") != run.evidence_pack.sha256
+    ):
         raise EvidencePlaneError(
             503,
             "service_unavailable",

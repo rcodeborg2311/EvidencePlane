@@ -137,7 +137,7 @@ POST /api/v1/runs/{run_id}/review/reject
 Authorization: Bearer <ADMIN_TOKEN>
 ```
 
-The review action stores reviewer identity, note, outcome, and UTC timestamp. Evidence exports include the current review state and recompute `evidence_sha256` when review state changes.
+The review action stores reviewer identity, note, outcome, and UTC timestamp on the run snapshot. It also appends a hashed `review_events` record so human review history remains auditable. Evidence exports include the current review state plus the append-only review event list, and recompute `evidence_sha256` when review state changes.
 
 ## AI Agent Code
 
@@ -167,7 +167,7 @@ Read `docs/integrations/mcp.md` for the current design notes.
 - `POST /api/v1/runs` requires HMAC SHA-256 in `X-EvidencePlane-Signature`.
 - Invalid signatures return `401 invalid_signature`.
 - Payloads over 256 KB return `413 payload_too_large`.
-- `ADMIN_TOKEN` is reserved for mutating non-ingest endpoints; this MVP does not expose any such endpoint.
+- `ADMIN_TOKEN` protects human review approve/reject endpoints.
 - EvidencePlane stores metadata, hashes, policy outcomes, and short fields. It does not store full source code blobs or secret values.
 - Stack traces are not exposed in HTTP responses.
 
@@ -175,7 +175,7 @@ Read `docs/integrations/mcp.md` for the current design notes.
 
 Evidence packs include `evidence_sha256`. The digest is computed over canonical JSON with sorted keys and stable separators while excluding the `evidence_sha256` field itself. Including the digest inside the bytes being digested would make the value self-referential.
 
-Evidence export recomputes the digest and fails if the stored pack does not match the persisted hash.
+Evidence export recomputes the digest and fails if the stored pack does not match the persisted hash. Human review events also carry their own SHA-256 hash, computed over canonical event JSON while excluding `event_sha256`.
 
 Each decision and evidence pack also includes `policy_version`, currently `1.0`, so reviewers can prove which deterministic policy evaluated a run.
 
@@ -204,7 +204,8 @@ docker compose down
 .venv/bin/python --version
 .venv/bin/python -m compileall app tests scripts adapters
 .venv/bin/python -m pytest -q
-DATABASE_URL='sqlite:///./evidenceplane-check.db' .venv/bin/alembic upgrade head
+DATABASE_URL='postgresql+psycopg://evidenceplane:password@127.0.0.1:5432/evidenceplane' \
+  .venv/bin/alembic upgrade head
 ```
 
 No formatter, linter, or type checker dependency is configured because the MVP is constrained to the requested dependency list.

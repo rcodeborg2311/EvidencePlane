@@ -68,6 +68,17 @@ class Violation(StrictModel):
     severity: Severity
 
 
+class ReviewEventSummary(StrictModel):
+    event_id: UUID
+    sequence: int = Field(ge=1)
+    action: ReviewOutcome
+    actor: str
+    reason: str | None
+    created_at: datetime
+    previous_event_sha256: str | None
+    event_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class DecisionResponse(StrictModel):
     run_id: UUID
     decision: Decision
@@ -111,6 +122,7 @@ class RunDetail(RunSummary):
     policy_context: PolicyContext
     violations: list[Violation]
     evidence_pack_id: UUID
+    review_events: list[ReviewEventSummary]
 
 
 class ReviewRequest(StrictModel):

@@ -63,6 +63,12 @@ class Run(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    review_events: Mapped[list[ReviewEvent]] = relationship(
+        "ReviewEvent",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="ReviewEvent.sequence",
+    )
 
 
 class ViolationRecord(Base):
@@ -95,3 +101,24 @@ class EvidencePack(Base):
     )
 
     run: Mapped[Run] = relationship("Run", back_populates="evidence_pack")
+
+
+class ReviewEvent(Base):
+    __tablename__ = "review_events"
+    __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="uq_review_events_run_sequence"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    previous_event_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    event_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    run: Mapped[Run] = relationship("Run", back_populates="review_events")

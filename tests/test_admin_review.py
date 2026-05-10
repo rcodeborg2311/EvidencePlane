@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from datetime import timezone
+from uuid import UUID
 from uuid import uuid4
 
-from app.services.evidence import compute_evidence_sha256
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.database import get_engine
+from app.models.db import ReviewEvent
+from app.services.evidence import (
+    build_review_event,
+    compute_evidence_sha256,
+    compute_review_event_sha256,
+)
 from tests.conftest import admin_headers, base_receipt, post_receipt
 
 
@@ -42,6 +53,25 @@ def reject(client, run_id: str, token: str = "test-admin-token"):
     )
 
 
+def event_body_from_record(event: ReviewEvent) -> dict:
+    created_at = event.created_at
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    else:
+        created_at = created_at.astimezone(timezone.utc)
+    return {
+        "event_id": str(event.id),
+        "run_id": str(event.run_id),
+        "sequence": event.sequence,
+        "action": event.action,
+        "actor": event.actor,
+        "reason": event.reason,
+        "created_at": created_at.isoformat().replace("+00:00", "Z"),
+        "previous_event_sha256": event.previous_event_sha256,
+        "event_sha256": event.event_sha256,
+    }
+
+
 def test_review_decision_creates_pending_review(client):
     response = post_receipt(client, review_receipt("review-pending"))
 
@@ -79,6 +109,8 @@ def test_approve_pending_review_with_valid_admin_token_succeeds(client):
     assert data["review_outcome"] == "approved"
     assert data["reviewer_identity"] == "security@example.com"
     assert data["reviewed_at"] is not None
+    assert len(data["review_events"]) == 1
+    assert data["review_events"][0]["action"] == "approved"
 
 
 def test_reject_pending_review_with_valid_admin_token_succeeds(client):
@@ -173,7 +205,111 @@ def test_evidence_export_includes_current_review_state(client):
     assert evidence["review_outcome"] == "approved"
     assert evidence["reviewer_identity"] == "security@example.com"
     assert evidence["reviewed_at"] == approved.json()["reviewed_at"]
+    assert evidence["review_events"] == [
+        {
+            "event_id": evidence["review_events"][0]["event_id"],
+            "run_id": run_id,
+            "sequence": 1,
+            "action": "approved",
+            "actor": "security@example.com",
+            "reason": "Approved after checking test gap.",
+            "created_at": approved.json()["reviewed_at"],
+            "previous_event_sha256": None,
+            "event_sha256": evidence["review_events"][0]["event_sha256"],
+        }
+    ]
+    assert evidence["review_events"][0]["event_sha256"] == compute_review_event_sha256(
+        evidence["review_events"][0]
+    )
     assert evidence["evidence_sha256"] == compute_evidence_sha256(evidence)
+
+
+def test_evidence_export_fails_when_review_event_content_is_tampered(client):
+    created = post_receipt(client, review_receipt("evidence-review-tamper"))
+    run_id = created.json()["run_id"]
+    approve(client, run_id)
+
+    with Session(get_engine()) as session:
+        event = session.scalar(
+            select(ReviewEvent).where(ReviewEvent.run_id == UUID(run_id))
+        )
+        assert event is not None
+        event.actor = "attacker@example.com"
+        session.commit()
+
+    response = client.get(f"/api/v1/evidence/{run_id}")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
+
+
+def test_evidence_export_fails_when_review_event_sequence_is_tampered(client):
+    created = post_receipt(client, review_receipt("evidence-review-sequence-tamper"))
+    run_id = created.json()["run_id"]
+    approve(client, run_id)
+
+    with Session(get_engine()) as session:
+        event = session.scalar(
+            select(ReviewEvent).where(ReviewEvent.run_id == UUID(run_id))
+        )
+        assert event is not None
+        event.sequence = 2
+        body = event_body_from_record(event)
+        body["event_sha256"] = compute_review_event_sha256(body)
+        event.event_sha256 = body["event_sha256"]
+        session.commit()
+
+    response = client.get(f"/api/v1/evidence/{run_id}")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
+
+
+def test_evidence_export_fails_when_review_event_chain_is_tampered(client):
+    created = post_receipt(client, review_receipt("evidence-review-chain-tamper"))
+    run_id = created.json()["run_id"]
+    approve(client, run_id)
+
+    with Session(get_engine()) as session:
+        first_event = session.scalar(
+            select(ReviewEvent).where(ReviewEvent.run_id == UUID(run_id))
+        )
+        assert first_event is not None
+        second_event_id = uuid4()
+        created_at = first_event.created_at
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        else:
+            created_at = created_at.astimezone(timezone.utc)
+        second_body = build_review_event(
+            event_id=second_event_id,
+            run_id=UUID(run_id),
+            sequence=2,
+            action="approved",
+            actor="security@example.com",
+            reason="Injected event with invalid chain pointer.",
+            created_at=created_at,
+            previous_event_sha256="0" * 64,
+        )
+        session.add(
+            ReviewEvent(
+                id=second_event_id,
+                run_id=UUID(run_id),
+                sequence=2,
+                action="approved",
+                actor="security@example.com",
+                reason="Injected event with invalid chain pointer.",
+                created_at=created_at,
+                previous_event_sha256="0" * 64,
+                event_sha256=second_body["event_sha256"],
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/api/v1/evidence/{run_id}")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "service_unavailable"
 
 
 def test_dashboard_html_includes_pending_review_state(client):
@@ -201,5 +337,6 @@ def test_run_detail_html_renders_review_states(client):
 
     assert "Human review required" in pending_html
     assert "Approved by human reviewer" in approved_html
+    assert "Review history" in approved_html
     assert "Rejected by human reviewer" in rejected_html
     assert "Human review not required" in not_required_html

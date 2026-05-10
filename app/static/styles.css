@@ -650,6 +650,35 @@ tr:last-child td {
   background: var(--block-soft);
 }
 
+.review-history-panel {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 24px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.review-history-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.review-history-list li {
+  padding: 10px 0;
+}
+
+.review-history-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
 .review-actions {
   display: grid;
   width: min(620px, 100%);
