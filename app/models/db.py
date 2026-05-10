@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -16,13 +16,180 @@ jsonb_type = JSON().with_variant(postgresql.JSONB(), "postgresql")
 
 
 class Base(DeclarativeBase):
-    """Base class for SQLAlchemy ORM models."""
+    pass
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    plan: Mapped[str] = mapped_column(String(32), nullable=False, default="pilot")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    users: Mapped[list[User]] = relationship("User", back_populates="organization")
+    repositories: Mapped[list[Repository]] = relationship(
+        "Repository", back_populates="organization"
+    )
+    evidence_sources: Mapped[list[EvidenceSource]] = relationship(
+        "EvidenceSource", back_populates="organization"
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "email", name="uq_users_org_email"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(String(254), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_identity_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    organization: Mapped[Organization] = relationship(
+        "Organization", back_populates="users"
+    )
+    memberships: Mapped[list[Membership]] = relationship(
+        "Membership", back_populates="user"
+    )
+
+
+class Membership(Base):
+    __tablename__ = "memberships"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id", "user_id", name="uq_memberships_org_user"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="viewer")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+
+    user: Mapped[User] = relationship("User", back_populates="memberships")
+
+
+class Repository(Base):
+    __tablename__ = "repositories"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "provider",
+            "owner",
+            "name",
+            name="uq_repositories_org_provider_owner_name",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="github")
+    owner: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    default_branch: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    organization: Mapped[Organization] = relationship(
+        "Organization", back_populates="repositories"
+    )
+    evidence_sources: Mapped[list[EvidenceSource]] = relationship(
+        "EvidenceSource", back_populates="repository"
+    )
+
+
+class EvidenceSource(Base):
+    __tablename__ = "evidence_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    signing_secret_ref: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    trust_level: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="ci_verified"
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    organization: Mapped[Organization] = relationship(
+        "Organization", back_populates="evidence_sources"
+    )
+    repository: Mapped[Repository | None] = relationship(
+        "Repository", back_populates="evidence_sources"
+    )
+
+
+class PolicyConfig(Base):
+    __tablename__ = "policy_configs"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    config_json: Mapped[dict] = mapped_column(jsonb_type, nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
 
 
 class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organizations.id"), nullable=True, index=True
+    )
+    repository_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("repositories.id"), nullable=True, index=True
+    )
+    evidence_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("evidence_sources.id"), nullable=True
+    )
     idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     repo_name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -91,6 +258,9 @@ class EvidencePack(Base):
     __table_args__ = (UniqueConstraint("run_id", name="uq_evidence_packs_run_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organizations.id"), nullable=True, index=True
+    )
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
     )
@@ -110,6 +280,12 @@ class ReviewEvent(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("organizations.id"), nullable=True
+    )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True
+    )
     run_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
