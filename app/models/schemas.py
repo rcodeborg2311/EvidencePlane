@@ -369,3 +369,21 @@ class CaseSummary(BaseModel):
     title: str
     created_at: datetime
     resolved_at: datetime | None
+
+
+# --------------------------------------------------------------------------- #
+# Advisor layer schemas
+# --------------------------------------------------------------------------- #
+
+class AdvisorFindingResponse(BaseModel):
+    finding_id: UUID
+    case_id: UUID
+    model_provider: str
+    model_version: str
+    prompt_sha256: str
+    verdict_explanation: str
+    suggested_fixes: list[dict]
+    draft_resolution_note: str
+    is_advisory: bool
+    advisory_warning: str
+    created_at: datetime

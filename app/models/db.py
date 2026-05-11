@@ -488,6 +488,10 @@ class Case(Base):
         "CaseParticipant", back_populates="case", cascade="all, delete-orphan",
         order_by="CaseParticipant.added_at"
     )
+    advisor_findings: Mapped[list["AdvisorFinding"]] = relationship(
+        "AdvisorFinding", back_populates="case", cascade="all, delete-orphan",
+        order_by="AdvisorFinding.created_at"
+    )
 
 
 class CaseParticipant(Base):
@@ -562,6 +566,24 @@ class CaseExternalLink(Base):
     )
 
     case: Mapped[Case] = relationship("Case", back_populates="external_links")
+
+
+class AdvisorFinding(Base):
+    __tablename__ = "advisor_findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    model_provider: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_json: Mapped[dict] = mapped_column(jsonb_type, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    case: Mapped[Case] = relationship("Case", back_populates="advisor_findings")
 
 
 class RepoSettings(Base):

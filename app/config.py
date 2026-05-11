@@ -22,6 +22,7 @@ class Settings:
     github_app_id: str | None
     github_webhook_secret: str | None
     github_app_private_key: str | None
+    anthropic_api_key: str | None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -50,6 +51,7 @@ class Settings:
             github_app_id=read_secret("GITHUB_APP_ID") or None,
             github_webhook_secret=read_secret("GITHUB_WEBHOOK_SECRET") or None,
             github_app_private_key=read_secret("GITHUB_APP_PRIVATE_KEY") or None,
+            anthropic_api_key=read_secret("ANTHROPIC_API_KEY") or None,
         )
 
 

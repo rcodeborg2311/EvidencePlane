@@ -20,6 +20,7 @@ from app.database import get_session
 from app.errors import EvidencePlaneError
 from app.models.db import Organization, UserSession, ROLES, role_meets
 from app.models.schemas import (
+    AdvisorFindingResponse,
     CaseExternalLinkRequest,
     CaseMessageRequest,
     CaseResponse,
@@ -54,6 +55,7 @@ from app.services.github import (
     update_check_run_for_run,
     validate_github_signature,
 )
+from app.services.advisor import list_advisor_findings, request_advisor_finding
 from app.services.case_rooms import (
     add_external_link,
     add_message,
@@ -622,6 +624,29 @@ def get_run_case_endpoint(
     db: Session = Depends(get_session),
 ) -> CaseResponse | None:
     return get_case_for_run(db, run_id)
+
+
+@router.post("/api/v1/cases/{case_id}/advisor", response_model=AdvisorFindingResponse)
+def request_advisor_finding_endpoint(
+    case_id: UUID,
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> AdvisorFindingResponse:
+    if not settings.anthropic_api_key:
+        raise EvidencePlaneError(
+            503, "advisor_not_configured", "Advisor is not configured on this instance."
+        )
+    return request_advisor_finding(db, case_id, settings.anthropic_api_key)
+
+
+@router.get("/api/v1/cases/{case_id}/advisor", response_model=list[AdvisorFindingResponse])
+def list_advisor_findings_endpoint(
+    case_id: UUID,
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> list[AdvisorFindingResponse]:
+    return list_advisor_findings(db, case_id)
 
 
 @router.get("/")
