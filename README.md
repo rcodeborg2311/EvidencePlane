@@ -52,6 +52,20 @@ export ADMIN_TOKEN_FILE='/run/secrets/admin_token'
 
 API docs are disabled by default. Set `EVIDENCEPLANE_ENABLE_DOCS=true` only for trusted local development if `/docs`, `/redoc`, or `/openapi.json` are needed.
 
+Optional OIDC login variables:
+
+```sh
+export OIDC_ISSUER='https://idp.example.com'
+export OIDC_CLIENT_ID='evidenceplane-client-id'
+export OIDC_CLIENT_SECRET='replace-with-client-secret'
+export OIDC_REDIRECT_URI='https://evidenceplane.example.com/auth/oidc/callback'
+```
+
+`OIDC_ISSUER` must match the issuer returned by the provider's
+`/.well-known/openid-configuration` document. EvidencePlane verifies ID tokens
+against the provider JWKS and requires valid issuer, audience, expiry, issued-at,
+and subject claims.
+
 ## Local Development
 
 ```sh

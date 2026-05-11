@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import hmac as _hmac
 import secrets
@@ -17,6 +18,19 @@ from app.services.auth import _create_session  # reuse internal helper
 
 
 _SCOPES = "openid email profile"
+_ID_TOKEN_ALGORITHMS = ["RS256", "ES256"]
+
+
+@dataclass(frozen=True)
+class OidcProviderMetadata:
+    issuer: str
+    authorization_endpoint: str | None
+    token_endpoint: str
+    jwks_uri: str
+
+
+def _normalize_issuer(issuer: str) -> str:
+    return issuer.rstrip("/")
 
 
 def generate_state(hmac_secret: str) -> str:
@@ -57,6 +71,88 @@ def build_auth_url(
     )
 
 
+def _fetch_provider_metadata(issuer: str) -> OidcProviderMetadata:
+    expected_issuer = _normalize_issuer(issuer)
+    discovery_url = f"{expected_issuer}/.well-known/openid-configuration"
+    try:
+        resp = httpx.get(discovery_url, timeout=10.0)
+    except httpx.RequestError as exc:
+        raise EvidencePlaneError(
+            502, "oidc_discovery_error", "OIDC discovery request failed."
+        ) from exc
+
+    if resp.status_code != 200:
+        raise EvidencePlaneError(
+            502,
+            "oidc_discovery_error",
+            f"OIDC discovery endpoint returned {resp.status_code}.",
+        )
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise EvidencePlaneError(
+            502, "oidc_discovery_error", "OIDC discovery response is not valid JSON."
+        ) from exc
+
+    discovered_issuer = data.get("issuer")
+    token_endpoint = data.get("token_endpoint")
+    jwks_uri = data.get("jwks_uri")
+    authorization_endpoint = data.get("authorization_endpoint")
+    if discovered_issuer != expected_issuer:
+        raise EvidencePlaneError(
+            502,
+            "oidc_discovery_error",
+            "OIDC discovery issuer does not match configured issuer.",
+        )
+    if not isinstance(token_endpoint, str) or not token_endpoint:
+        raise EvidencePlaneError(
+            502,
+            "oidc_discovery_error",
+            "OIDC discovery response is missing token_endpoint.",
+        )
+    if not isinstance(jwks_uri, str) or not jwks_uri:
+        raise EvidencePlaneError(
+            502,
+            "oidc_discovery_error",
+            "OIDC discovery response is missing jwks_uri.",
+        )
+
+    return OidcProviderMetadata(
+        issuer=discovered_issuer,
+        authorization_endpoint=authorization_endpoint
+        if isinstance(authorization_endpoint, str)
+        else None,
+        token_endpoint=token_endpoint,
+        jwks_uri=jwks_uri,
+    )
+
+
+def _decode_id_token(
+    id_token: str,
+    *,
+    metadata: OidcProviderMetadata,
+    client_id: str,
+) -> dict:
+    try:
+        signing_key = jwt.PyJWKClient(metadata.jwks_uri).get_signing_key_from_jwt(
+            id_token
+        )
+        return jwt.decode(
+            id_token,
+            signing_key.key,
+            algorithms=_ID_TOKEN_ALGORITHMS,
+            audience=client_id,
+            issuer=metadata.issuer,
+            leeway=60,
+            options={"require": ["exp", "iat", "sub"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise EvidencePlaneError(
+            401, "oidc_invalid_token", "OIDC ID token failed verification."
+        ) from exc
+
+
 def exchange_code(
     code: str,
     *,
@@ -66,9 +162,9 @@ def exchange_code(
     redirect_uri: str,
 ) -> dict:
     """Exchange auth code for ID token. Returns decoded claims dict."""
-    token_url = f"{issuer.rstrip('/')}/token"
+    metadata = _fetch_provider_metadata(issuer)
     resp = httpx.post(
-        token_url,
+        metadata.token_endpoint,
         data={
             "grant_type": "authorization_code",
             "code": code,
@@ -87,14 +183,7 @@ def exchange_code(
     if not id_token:
         raise EvidencePlaneError(502, "oidc_no_id_token", "No id_token in token response.")
 
-    # Decode without signature verification. Production deployments should
-    # fetch JWKS from {issuer}/.well-known/openid-configuration and verify.
-    claims = jwt.decode(
-        id_token,
-        options={"verify_signature": False, "verify_exp": False},
-        algorithms=["RS256", "ES256", "HS256"],
-    )
-    return claims
+    return _decode_id_token(id_token, metadata=metadata, client_id=client_id)
 
 
 def provision_oidc_user(session: Session, claims: dict) -> tuple[User, str]:
