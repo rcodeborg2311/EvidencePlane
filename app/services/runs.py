@@ -281,6 +281,15 @@ def store_run(session: Session, receipt: RunReceipt, raw_body: bytes) -> Decisio
     )
 
     session.add(run)
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="run_decided",
+        actor_identity=receipt.actor,
+        resource_type="run",
+        resource_id=str(run_id),
+        payload={"decision": policy_decision.decision, "risk_score": policy_decision.risk_score},
+    )
     session.commit()
 
     # Auto-create a Case Room for review/block decisions
@@ -391,6 +400,15 @@ def review_run(
     run.review_note = review_note
     run.reviewed_at = reviewed_at
     _sync_evidence_review_state(run)
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type=f"review_{outcome}",
+        actor_identity=reviewer_identity,
+        resource_type="run",
+        resource_id=str(run_id),
+        payload={"outcome": outcome, "review_note": review_note},
+    )
     session.commit()
 
     saved = session.scalar(_run_options(select(Run).where(Run.id == run_id)))

@@ -23,6 +23,12 @@ class Settings:
     github_webhook_secret: str | None
     github_app_private_key: str | None
     anthropic_api_key: str | None
+    siem_webhook_url: str | None
+    siem_webhook_token: str | None
+    oidc_issuer: str | None
+    oidc_client_id: str | None
+    oidc_client_secret: str | None
+    oidc_redirect_uri: str | None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,6 +58,12 @@ class Settings:
             github_webhook_secret=read_secret("GITHUB_WEBHOOK_SECRET") or None,
             github_app_private_key=read_secret("GITHUB_APP_PRIVATE_KEY") or None,
             anthropic_api_key=read_secret("ANTHROPIC_API_KEY") or None,
+            siem_webhook_url=read_secret("SIEM_WEBHOOK_URL") or None,
+            siem_webhook_token=read_secret("SIEM_WEBHOOK_TOKEN") or None,
+            oidc_issuer=read_secret("OIDC_ISSUER") or None,
+            oidc_client_id=read_secret("OIDC_CLIENT_ID") or None,
+            oidc_client_secret=read_secret("OIDC_CLIENT_SECRET") or None,
+            oidc_redirect_uri=read_secret("OIDC_REDIRECT_URI") or None,
         )
 
 

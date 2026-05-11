@@ -568,6 +568,24 @@ class CaseExternalLink(Base):
     case: Mapped[Case] = relationship("Case", back_populates="external_links")
 
 
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    actor_identity: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    resource_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    payload_json: Mapped[dict | None] = mapped_column(jsonb_type, nullable=True)
+    siem_forwarded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+
+
 class AdvisorFinding(Base):
     __tablename__ = "advisor_findings"
 

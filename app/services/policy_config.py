@@ -50,6 +50,15 @@ def create_policy_config(
         created_at=utc_now(),
     )
     session.add(config)
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="policy_changed",
+        resource_type="policy_config",
+        resource_id=str(config.id),
+        payload={"repo_name": config.repo_name, "version": config.version},
+        organization_id=org.id,
+    )
     session.commit()
     session.refresh(config)
     return PolicyConfigResponse(

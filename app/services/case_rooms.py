@@ -275,6 +275,15 @@ def resolve_case(
         actor_identity=request.resolved_by,
         payload={"resolution_note": request.resolution_note},
     )
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="case_resolved",
+        actor_identity=request.resolved_by,
+        resource_type="case",
+        resource_id=str(case_id),
+        payload={"resolution_note": request.resolution_note},
+    )
     session.commit()
     session.refresh(case)
     return _to_case_response(case)
@@ -302,6 +311,15 @@ def dismiss_case(
         case,
         event_type="dismissed",
         actor_identity=actor_identity,
+        payload={"note": note},
+    )
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="case_dismissed",
+        actor_identity=actor_identity,
+        resource_type="case",
+        resource_id=str(case_id),
         payload={"note": note},
     )
     session.commit()

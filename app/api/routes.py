@@ -21,7 +21,11 @@ from app.errors import EvidencePlaneError
 from app.models.db import Organization, UserSession, ROLES, role_meets
 from app.models.schemas import (
     AdvisorFindingResponse,
+    AuditBundleResponse,
+    AuditEventResponse,
     CaseExternalLinkRequest,
+    DashboardResponse,
+    SiemFlushResponse,
     CaseMessageRequest,
     CaseResponse,
     CaseResolveRequest,
@@ -56,6 +60,16 @@ from app.services.github import (
     validate_github_signature,
 )
 from app.services.advisor import list_advisor_findings, request_advisor_finding
+from app.services.audit import build_audit_bundle, flush_pending_to_siem, list_audit_events
+from app.services.dashboard import get_dashboard
+from app.services.oidc import build_auth_url, exchange_code, generate_state, provision_oidc_user, validate_state
+from app.services.scim import (
+    scim_create_user,
+    scim_delete_user,
+    scim_get_user,
+    scim_list_users,
+    scim_patch_user,
+)
 from app.services.case_rooms import (
     add_external_link,
     add_message,
@@ -647,6 +661,149 @@ def list_advisor_findings_endpoint(
     db: Session = Depends(get_session),
 ) -> list[AdvisorFindingResponse]:
     return list_advisor_findings(db, case_id)
+
+
+# --------------------------------------------------------------------------- #
+# Stage 7: Audit events
+# --------------------------------------------------------------------------- #
+
+@router.get("/api/v1/audit-events", response_model=list[AuditEventResponse])
+def list_audit_events_endpoint(
+    event_type: str | None = None,
+    resource_id: str | None = None,
+    limit: int = 100,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> list[AuditEventResponse]:
+    return list_audit_events(db, event_type=event_type, resource_id=resource_id, limit=limit)
+
+
+@router.post("/api/v1/admin/siem/flush", response_model=SiemFlushResponse)
+def siem_flush_endpoint(
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> SiemFlushResponse:
+    if not settings.siem_webhook_url or not settings.siem_webhook_token:
+        raise EvidencePlaneError(503, "siem_not_configured", "SIEM webhook is not configured.")
+    count = flush_pending_to_siem(db, settings.siem_webhook_url, settings.siem_webhook_token)
+    return SiemFlushResponse(forwarded=count)
+
+
+@router.get("/api/v1/audit-bundle")
+def audit_bundle_endpoint(
+    repo_name: str,
+    from_date: str,
+    to_date: str,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> dict:
+    return build_audit_bundle(db, repo_name, from_date, to_date)
+
+
+# --------------------------------------------------------------------------- #
+# Stage 7: Dashboard
+# --------------------------------------------------------------------------- #
+
+@router.get("/api/v1/dashboard", response_model=DashboardResponse)
+def dashboard_api_endpoint(
+    _: UserSession | None = Depends(require_reviewer),
+    db: Session = Depends(get_session),
+) -> DashboardResponse:
+    return get_dashboard(db)
+
+
+# --------------------------------------------------------------------------- #
+# Stage 7: SCIM v2
+# --------------------------------------------------------------------------- #
+
+@router.get("/scim/v2/Users")
+def scim_list_users_endpoint(
+    filter: str | None = None,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> dict:
+    return scim_list_users(db, filter_str=filter)
+
+
+@router.post("/scim/v2/Users", status_code=201)
+def scim_create_user_endpoint(
+    request_body: dict,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> dict:
+    return scim_create_user(db, request_body)
+
+
+@router.get("/scim/v2/Users/{user_id}")
+def scim_get_user_endpoint(
+    user_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> dict:
+    return scim_get_user(db, user_id)
+
+
+@router.patch("/scim/v2/Users/{user_id}")
+def scim_patch_user_endpoint(
+    user_id: UUID,
+    request_body: dict,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> dict:
+    return scim_patch_user(db, user_id, request_body)
+
+
+@router.delete("/scim/v2/Users/{user_id}", status_code=204)
+def scim_delete_user_endpoint(
+    user_id: UUID,
+    _: UserSession | None = Depends(require_admin),
+    db: Session = Depends(get_session),
+) -> None:
+    scim_delete_user(db, user_id)
+
+
+# --------------------------------------------------------------------------- #
+# Stage 7: OIDC SSO
+# --------------------------------------------------------------------------- #
+
+@router.get("/auth/oidc/login")
+def oidc_login_endpoint(
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    if not settings.oidc_issuer or not settings.oidc_client_id:
+        raise EvidencePlaneError(503, "oidc_not_configured", "OIDC is not configured.")
+    state = generate_state(settings.hmac_secret)
+    url = build_auth_url(
+        issuer=settings.oidc_issuer,
+        client_id=settings.oidc_client_id,
+        redirect_uri=settings.oidc_redirect_uri or "",
+        state=state,
+    )
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=url, status_code=302)
+
+
+@router.get("/auth/oidc/callback")
+def oidc_callback_endpoint(
+    code: str,
+    state: str,
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_session),
+) -> dict:
+    if not settings.oidc_issuer or not settings.oidc_client_id or not settings.oidc_client_secret:
+        raise EvidencePlaneError(503, "oidc_not_configured", "OIDC is not configured.")
+    if not validate_state(state, settings.hmac_secret):
+        raise EvidencePlaneError(400, "invalid_state", "OIDC state parameter is invalid or expired.")
+    claims = exchange_code(
+        code,
+        issuer=settings.oidc_issuer,
+        client_id=settings.oidc_client_id,
+        client_secret=settings.oidc_client_secret,
+        redirect_uri=settings.oidc_redirect_uri or "",
+    )
+    _user, token = provision_oidc_user(db, claims)
+    return {"token": token, "token_type": "Bearer"}
 
 
 @router.get("/")

@@ -43,6 +43,15 @@ def create_evidence_source(
         created_at=utc_now(),
     )
     session.add(src)
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="source_created",
+        resource_type="evidence_source",
+        resource_id=str(src.id),
+        payload={"source_type": src.source_type, "display_name": src.display_name},
+        organization_id=org.id,
+    )
     session.commit()
     session.refresh(src)
     return _to_response(src)
@@ -72,6 +81,14 @@ def disable_evidence_source(session: Session, source_id) -> None:
     if src is None:
         raise EvidencePlaneError(404, "not_found", "Evidence source not found.")
     src.enabled = False
+    from app.services.audit import emit_audit_event
+    emit_audit_event(
+        session,
+        event_type="source_disabled",
+        resource_type="evidence_source",
+        resource_id=str(src.id),
+        payload={"display_name": src.display_name},
+    )
     session.commit()
 
 

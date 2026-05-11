@@ -375,6 +375,70 @@ class CaseSummary(BaseModel):
 # Advisor layer schemas
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# Audit event schemas
+# --------------------------------------------------------------------------- #
+
+class AuditEventResponse(BaseModel):
+    event_id: UUID
+    organization_id: UUID | None
+    event_type: str
+    actor_identity: str | None
+    resource_type: str | None
+    resource_id: str | None
+    payload: dict | None
+    siem_forwarded_at: datetime | None
+    created_at: datetime
+
+
+class SiemFlushResponse(BaseModel):
+    forwarded: int
+
+
+class AuditBundleResponse(BaseModel):
+    generated_at: datetime
+    repo_name: str
+    from_date: str
+    to_date: str
+    runs_count: int
+    evidence_packs: list[dict]
+    audit_events: list[dict]
+    bundle_sha256: str
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard schema
+# --------------------------------------------------------------------------- #
+
+class DecisionBreakdown(BaseModel):
+    allow: int
+    review: int
+    block: int
+
+
+class CaseBreakdown(BaseModel):
+    open: int
+    resolved: int
+    dismissed: int
+
+
+class ViolationCount(BaseModel):
+    code: str
+    count: int
+
+
+class DashboardResponse(BaseModel):
+    total_runs: int
+    decisions: DecisionBreakdown
+    pending_reviews: int
+    cases: CaseBreakdown
+    top_violations: list[ViolationCount]
+
+
+# --------------------------------------------------------------------------- #
+# Advisor layer schemas
+# --------------------------------------------------------------------------- #
+
 class AdvisorFindingResponse(BaseModel):
     finding_id: UUID
     case_id: UUID
